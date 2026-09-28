@@ -23,6 +23,10 @@ See the Mulan PSL v2 for more details. */
 using namespace std;
 using namespace common;
 
+/**
+ * @brief 析构函数，释放资源
+ * @details 析构函数会释放SelectStmt对象中持有的资源，包括查询涉及的表、查询字段表达式、过滤条件等。
+ */
 SelectStmt::~SelectStmt()
 {
   if (nullptr != filter_stmt_) {
@@ -38,11 +42,12 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     return RC::INVALID_ARGUMENT;
   }
 
-  BinderContext binder_context;
+  BinderContext binder_context; /// 创建BinderContext对象，用于绑定查询涉及的表
 
-  // collect tables in `from` statement
-  vector<Table *>                tables;
-  unordered_map<string, Table *> table_map;
+
+  vector<Table *>                tables; /// 存储查询涉及的表对象
+  unordered_map<string, Table *> table_map; /// 使用unordered_map存储表名和表对象的映射关系，方便后续查询和绑定字段表达式
+  // 循环遍历select_sql.relations，获取每个表名，并在数据库中查找对应的表对象
   for (size_t i = 0; i < select_sql.relations.size(); i++) {
     const char *table_name = select_sql.relations[i].c_str();
     if (nullptr == table_name) {
@@ -50,13 +55,13 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
       return RC::INVALID_ARGUMENT;
     }
 
-    Table *table = db->find_table(table_name);
+    Table *table = db->find_table(table_name); /// 在数据库中查找表对象
     if (nullptr == table) {
       LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
       return RC::SCHEMA_TABLE_NOT_EXIST;
     }
 
-    binder_context.add_table(table);
+    binder_context.add_table(table); /// 将表对象添加到BinderContext中，方便后续绑定字段表达式
     tables.push_back(table);
     table_map.insert({table_name, table});
   }

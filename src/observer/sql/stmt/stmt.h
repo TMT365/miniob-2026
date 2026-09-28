@@ -52,7 +52,11 @@ class Db;
   DEFINE_ENUM_ITEM(EXPLAIN)       \
   DEFINE_ENUM_ITEM(PREDICATE)     \
   DEFINE_ENUM_ITEM(SET_VARIABLE)
-
+/**
+ * @brief  StmtType 枚举类型
+ * @ingroup  Statement
+ * @details StmtType 枚举类型用于表示不同类型的 SQL 语句。每个枚举值对应一种 SQL 语句类型，例如 SELECT、INSERT、UPDATE 等。
+ */
 enum class StmtType
 {
 #define DEFINE_ENUM_ITEM(name) name,
@@ -60,6 +64,12 @@ enum class StmtType
 #undef DEFINE_ENUM_ITEM
 };
 
+/**
+ * inline 将函数体放在头文件中，编译器在编译时会将函数体直接插入到调用处，从而避免了函数调用的开销，提高了程序的执行效率。
+ * 将 StmtType 枚举类型转换为对应的字符串表示，方便调试和日志输出。
+ * @param type StmtType 枚举类型
+ * @return StmtType 对应的字符串表示
+ */
 inline const char *stmt_type_name(StmtType type)
 {
   switch (type) {
@@ -70,11 +80,11 @@ inline const char *stmt_type_name(StmtType type)
     default: return "unkown";
   }
 }
-
+// 判断StmtType是否是DDL语句
 bool stmt_type_ddl(StmtType type);
 
 /**
- * @brief Stmt for Statement
+ * @brief Stmt for Statement，所有 Stmt 的基类
  * @ingroup Statement
  * @details SQL解析后的语句，再进一步解析成Stmt，使用内部的数据结构来表示。
  * 比如table_name，解析成具体的 Table对象，attr/field name解析成Field对象。
@@ -84,10 +94,9 @@ class Stmt
 public:
   Stmt()          = default;
   virtual ~Stmt() = default;
-
+  // 获取对应子类的StmtType类型
   virtual StmtType type() const = 0;
 
-public:
   static RC create_stmt(Db *db, ParsedSqlNode &sql_node, Stmt *&stmt);
 
 private:

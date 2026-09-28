@@ -16,8 +16,10 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/sys/rc.h"
 #include "sql/stmt/stmt.h"
+#include "../observer/storage/field/field.h"
 
 class Table;
+class FilterStmt;
 
 /**
  * @brief 更新语句
@@ -27,18 +29,24 @@ class UpdateStmt : public Stmt
 {
 public:
   UpdateStmt() = default;
-  UpdateStmt(Table *table, Value *values, int value_amount);
+  UpdateStmt(Table *table,unique_ptr<Field> field,const Value *values, int value_amount, FilterStmt *filter_stmt);
+  ~UpdateStmt() override;
 
-public:
   static RC create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt);
+  StmtType type() const override { return StmtType::UPDATE; }
 
-public:
   Table *table() const { return table_; }
-  Value *values() const { return values_; }
+  const Value *values() const { return values_; }
   int    value_amount() const { return value_amount_; }
+  unique_ptr<Field>  field()  { return std::move(field_) ; }
+  FilterStmt *filter_stmt() const { return filter_stmt_; }
 
 private:
-  Table *table_        = nullptr;
-  Value *values_       = nullptr;
-  int    value_amount_ = 0;
+  Table   *table_             = nullptr;
+  //TODO 现在这里先只实现一个字段的更新，后续可以扩展为多个字段的更新
+  unique_ptr<Field>   field_  = nullptr;
+  const Value   *values_            = nullptr;
+  int     value_amount_ = 0;
+  //TODO 过滤字段现在只支持 AND ，后续可以扩展为 OR，NOT 等
+  FilterStmt *filter_stmt_    = nullptr;
 };

@@ -13,6 +13,8 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "storage/trx/vacuous_trx.h"
+#include "storage/table/table.h"
+#include "common/log/log.h"
 
 RC VacuousTrxKit::init() { return RC::SUCCESS; }
 
@@ -33,6 +35,27 @@ LogReplayer *VacuousTrxKit::create_log_replayer(Db &, LogHandler &) { return new
 RC VacuousTrx::insert_record(Table *table, Record &record) { return table->insert_record(record); }
 
 RC VacuousTrx::delete_record(Table *table, Record &record) { return table->delete_record(record); }
+
+RC VacuousTrx::update_record(Table *table, Record &old_record, Record &new_record)
+{
+  RC rc = RC::SUCCESS;
+
+  // 1. 先删除旧记录
+  rc = table->delete_record(old_record);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to delete old record. rc=%s", strrc(rc));
+    return rc;
+  }
+
+  // 2. 插入新记录
+  rc = table->insert_record(new_record);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to insert new record. rc=%s", strrc(rc));
+    return rc;
+  }
+
+  return RC::SUCCESS;
+}
 
 RC VacuousTrx::visit_record(Table *table, Record &record, ReadWriteMode) { return RC::SUCCESS; }
 

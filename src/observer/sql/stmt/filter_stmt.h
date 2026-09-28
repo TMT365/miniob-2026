@@ -30,16 +30,16 @@ struct FilterObj
   Field field;
   Value value;
 
-  void init_attr(const Field &field)
+  void init_attr(const Field &f)
   {
     is_attr     = true;
-    this->field = field;
+    this->field = f;
   }
 
-  void init_value(const Value &value)
+  void init_value(const Value &v)
   {
     is_attr     = false;
-    this->value = value;
+    this->value = v;
   }
 };
 

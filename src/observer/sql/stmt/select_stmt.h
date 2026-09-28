@@ -35,10 +35,9 @@ public:
 
   StmtType type() const override { return StmtType::SELECT; }
 
-public:
   static RC create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt);
 
-public:
+  // getter
   const vector<Table *> &tables() const { return tables_; }
   FilterStmt            *filter_stmt() const { return filter_stmt_; }
 
@@ -46,8 +45,8 @@ public:
   vector<unique_ptr<Expression>> &group_by() { return group_by_; }
 
 private:
-  vector<unique_ptr<Expression>> query_expressions_;
-  vector<Table *>                tables_;
-  FilterStmt                    *filter_stmt_ = nullptr;
-  vector<unique_ptr<Expression>> group_by_;
+  vector<unique_ptr<Expression>> query_expressions_; /// 查询字段表达式，是扁平化的，可能包含聚合函数
+  vector<Table *>                tables_; /// 查询涉及的表
+  FilterStmt                    *filter_stmt_ = nullptr; /// 查询条件
+  vector<unique_ptr<Expression>> group_by_; /// 分组字段表达式，是数组，支持多字段分组
 };

@@ -151,12 +151,13 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %destructor { delete $$; } <relation_list>
 %destructor { delete $$; } <key_list>
 
+//终结符，就是不可再拆分的token
 %token <number> NUMBER
 %token <floats> FLOAT
 %token <cstring> ID
 %token <cstring> SSS
-//非终结符
 
+//非终结符
 /** type 定义了各种解析后的结果输出的是什么类型。类型对应了 union 中的定义的成员变量名称 **/
 %type <number>              type
 %type <condition>           condition
@@ -210,6 +211,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %right UMINUS
 %%
 
+//所有语法解析的入口，解析结果放在sql_result中
 commands: command_wrapper opt_semicolon  //commands or sqls. parser starts here.
   {
     unique_ptr<ParsedSqlNode> sql_node = unique_ptr<ParsedSqlNode>($1);

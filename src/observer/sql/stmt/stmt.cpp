@@ -30,6 +30,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/show_tables_stmt.h"
 #include "sql/stmt/trx_begin_stmt.h"
 #include "sql/stmt/trx_end_stmt.h"
+#include "sql/stmt/update_stmt.h"
 
 bool stmt_type_ddl(StmtType type)
 {
@@ -45,16 +46,26 @@ bool stmt_type_ddl(StmtType type)
     }
   }
 }
+/**
+ * @brief 根据解析后的SQL节点（AST 抽象语法树）创建对应的Stmt对象
+ * @param db 当前数据库对象，来自 SessionEvent
+ * @param sql_node 是 ParseSqlNode 类型的引用， 解析后的SQL节点,（AST 抽象语法树）
+ * @param stmt 输出参数，指向创建的Stmt对象
+ * @return RC 返回操作结果码，表示创建Stmt是否成功
+ */
 RC Stmt::create_stmt(Db *db, ParsedSqlNode &sql_node, Stmt *&stmt)
 {
   stmt = nullptr;
-
+  // 根据解析后的SQL节点类型，创建对应的Stmt对象
   switch (sql_node.flag) {
     case SCF_INSERT: {
       return InsertStmt::create(db, sql_node.insertion, stmt);
     }
     case SCF_DELETE: {
       return DeleteStmt::create(db, sql_node.deletion, stmt);
+    }
+    case SCF_UPDATE: {
+      return UpdateStmt::create(db, sql_node.update, stmt);
     }
     case SCF_SELECT: {
       return SelectStmt::create(db, sql_node.selection, stmt);
@@ -117,5 +128,6 @@ RC Stmt::create_stmt(Db *db, ParsedSqlNode &sql_node, Stmt *&stmt)
       LOG_INFO("Command::type %d doesn't need to create statement.", sql_node.flag);
     } break;
   }
+  // 如果没有匹配的语句类型，返回未实现的错误码
   return RC::UNIMPLEMENTED;
 }

@@ -29,7 +29,8 @@ void ParsedSqlResult::add_sql_node(unique_ptr<ParsedSqlNode> sql_node)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-int sql_parse(const char *st, ParsedSqlResult *sql_result);
+// 显示加上 extern，避免我看不懂
+extern int sql_parse(const char *st, ParsedSqlResult *sql_result);
 
 RC parse(const char *st, ParsedSqlResult *sql_result)
 {

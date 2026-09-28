@@ -21,6 +21,8 @@ string(TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_LOWER)
 # 输出当前构建类型
 message(STATUS "Using build type: ${CMAKE_BUILD_TYPE}")
 
+option(ENABLE_LSM "Enable LSM storage engine" OFF)
+option(ENABLE_MVCC "Enable MVCC transaction" OFF)
 OPTION(ENABLE_ASAN "Enable build with address sanitizer" ON)
 OPTION(ENABLE_TSAN "Build with thread sanitizer" OFF)
 OPTION(ENABLE_UBSAN "Build with undefined behavior sanitizer" OFF)
@@ -196,3 +198,4 @@ ENDIF(WITH_BENCHMARK)
 IF(WITH_UNIT_TESTS)
     ADD_SUBDIRECTORY(unittest)
 ENDIF(WITH_UNIT_TESTS)
+

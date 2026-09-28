@@ -247,6 +247,47 @@ RC HeapTableEngine::delete_entry_of_indexes(const char *record, const RID &rid, 
   return rc;
 }
 
+RC HeapTableEngine::update_record_with_trx(const Record &old_record, const Record &new_record, Trx *trx)
+{
+  (void)trx;  // Vacuous 事务不使用 trx 参数
+  RC rc = RC::SUCCESS;
+
+  // 1. 删除旧记录的索引
+  rc = delete_entry_of_indexes(old_record.data(), old_record.rid(), false /* error_on_not_exists */);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to delete old record indexes. rc=%s", strrc(rc));
+    return rc;
+  }
+
+  // 2. 删除旧记录
+  rc = record_handler_->delete_record(&old_record.rid());
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to delete old record. rc=%s", strrc(rc));
+    return rc;
+  }
+
+  // 3. 插入新记录
+  rc = record_handler_->insert_record(new_record.data(), table_meta_->record_size(), const_cast<RID *>(&new_record.rid()));
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to insert new record. rc=%s", strrc(rc));
+    return rc;
+  }
+
+  // 4. 插入新记录的索引
+  rc = insert_entry_of_indexes(new_record.data(), new_record.rid());
+  if (rc != RC::SUCCESS) {
+    // 插入索引失败，需要回滚删除旧记录的操作
+    LOG_WARN("failed to insert new record indexes, rolling back. rc=%s", strrc(rc));
+    // 恢复旧记录的索引
+    insert_entry_of_indexes(old_record.data(), old_record.rid());
+    // 恢复旧记录
+    record_handler_->insert_record(old_record.data(), table_meta_->record_size(), const_cast<RID *>(&old_record.rid()));
+    return rc;
+  }
+
+  return RC::SUCCESS;
+}
+
 RC HeapTableEngine::sync()
 {
   RC rc = RC::SUCCESS;

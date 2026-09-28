@@ -27,7 +27,7 @@ while (0);
 %{
 #include<string.h>
 #include<stdio.h>
-#include <vector>
+#include<vector>
 
 /**
  * flex 代码包含三个部分，使用 %% 分隔
@@ -76,7 +76,7 @@ QUOTE            [\'\"]
 %%
 
 {WHITE_SPACE}                                        // ignore whitespace
-\n                                                   ;
+\n                                                    ;
 
 {DIGIT}+                           yylval->number=atoi(yytext); RETURN_TOKEN(NUMBER);
 {DIGIT}+{DOT}{DIGIT}+              yylval->floats=(float)(atof(yytext)); RETURN_TOKEN(FLOAT);

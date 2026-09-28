@@ -22,19 +22,31 @@ using namespace common;
 
 Table *BinderContext::find_table(const char *table_name) const
 {
+  /* C++ lambda 表达式 [table_name](Table *table) mutable -> 返回类型 { return 0 == strcasecmp(table_name, table->name()); };
+   * strcasecmp() 函数用于比较两个字符串，忽略大小写。返回值为0表示两个字符串相等。
+   */
   auto pred = [table_name](Table *table) { return 0 == strcasecmp(table_name, table->name()); };
+
+  //在一个范围 (range / 容器)里，找到第一个满足断言（predicate）的元素，返回对应的迭代器。ranges::borrowed_iterator_t<R>，对其解引用就是容器对象
   auto iter = ranges::find_if(query_tables_, pred);
   if (iter == query_tables_.end()) {
     return nullptr;
   }
+  // 解引用，获取Table *
   return *iter;
 }
 
-////////////////////////////////////////////////////////////////////////////////
+/**
+ * @brief 绑定通配符字段表达式
+ * @details 绑定通配符字段表达式，就是将通配符(*)解析为具体的字段表达式
+ * @param table Table* 表对象，表示要绑定的表
+ * @param expressions vector<unique_ptr<Expression>>& 表达式集合，表示绑定后的表达式集合
+ */
 static void wildcard_fields(Table *table, vector<unique_ptr<Expression>> &expressions)
 {
   const TableMeta &table_meta = table->table_meta();
   const int        field_num  = table_meta.field_num();
+  // 循环：从【系统字段数量】开始遍历，跳过隐藏的系统内置列，只取用户可见字段
   for (int i = table_meta.sys_field_num(); i < field_num; i++) {
     Field      field(table, table_meta.field(i));
     FieldExpr *field_expr = new FieldExpr(field);
@@ -105,11 +117,12 @@ RC ExpressionBinder::bind_star_expression(
     return RC::SUCCESS;
   }
 
-  auto star_expr = static_cast<StarExpr *>(expr.get());
+  auto star_expr = static_cast<StarExpr *>(expr.get()); /// 将表达式转换为StarExpr类型的指针
 
-  vector<Table *> tables_to_wildcard;
+  vector<Table *> tables_to_wildcard; /// 存储需要绑定通配符(*)的表对象
 
   const char *table_name = star_expr->table_name();
+  // 满足条件：table_name不为空，并且table_name不等于"*"
   if (!is_blank(table_name) && 0 != strcmp(table_name, "*")) {
     Table *table = context_.find_table(table_name);
     if (nullptr == table) {
@@ -123,6 +136,7 @@ RC ExpressionBinder::bind_star_expression(
     tables_to_wildcard.insert(tables_to_wildcard.end(), all_tables.begin(), all_tables.end());
   }
 
+  // 遍历需要绑定通配符(*)的表对象，将通配符(*)解析为具体的字段表达式，从原来的 Unbound 转换为 FieldExpr，并将其添加到 bound_expressions 中
   for (Table *table : tables_to_wildcard) {
     wildcard_fields(table, bound_expressions);
   }
@@ -137,13 +151,14 @@ RC ExpressionBinder::bind_unbound_field_expression(
     return RC::SUCCESS;
   }
 
-  auto unbound_field_expr = static_cast<UnboundFieldExpr *>(expr.get());
+  auto unbound_field_expr = static_cast<UnboundFieldExpr *>(expr.get()); /// 将表达式转换为UnboundFieldExpr类型的指针
 
   const char *table_name = unbound_field_expr->table_name();
   const char *field_name = unbound_field_expr->field_name();
 
   Table *table = nullptr;
   if (is_blank(table_name)) {
+    // 如果没有指定表名，那么就只能在查询的表中查找字段了，如果查询的表不止一个，那么就无法确定字段属于哪张表，就会报错
     if (context_.query_tables().size() != 1) {
       LOG_INFO("cannot determine table for field: %s", field_name);
       return RC::SCHEMA_TABLE_NOT_EXIST;
@@ -157,7 +172,8 @@ RC ExpressionBinder::bind_unbound_field_expression(
       return RC::SCHEMA_TABLE_NOT_EXIST;
     }
   }
-
+  // 如果字段名是通配符(*)，那么就将表中的所有字段都绑定为具体的字段表达式
+  // TODO 注意，strcmp(A,B)的返回值是 0 表示 A 和 B 相等，< 0 表示 A 小于 B，> 0 表示 A 大于 B
   if (0 == strcmp(field_name, "*")) {
     wildcard_fields(table, bound_expressions);
   } else {
@@ -211,12 +227,13 @@ RC ExpressionBinder::bind_cast_expression(
     LOG_WARN("invalid children number of cast expression: %d", child_bound_expressions.size());
     return RC::INVALID_ARGUMENT;
   }
-
+  // 递归绑定子表达式，如果子表达式已经被绑定过了，那么就直接使用绑定后的子表达式，否则就将绑定后的子表达式替换原来的子表达式
   unique_ptr<Expression> &child = child_bound_expressions[0];
+  // 判断 child 和 child_expr 是否指向同一个对象，如果是，那么就说明子表达式已经被绑定过了，直接返回成功
   if (child.get() == child_expr.get()) {
     return RC::SUCCESS;
   }
-
+  // 如果 child 和 child_expr 不指向同一个对象，那么就说明子表达式还没有被绑定过，那么就将绑定后的子表达式替换原来的子表达式
   child_expr.reset(child.release());
   bound_expressions.emplace_back(std::move(expr));
   return RC::SUCCESS;

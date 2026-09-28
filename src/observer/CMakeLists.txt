@@ -22,7 +22,11 @@ SET(LIB_SRC ${LIB_SRC} ${LEXER_SOURCES} ${PARSER_SOURCES})
 FOREACH (F ${ALL_SRC})
 
     IF (NOT ${F} STREQUAL ${MAIN_SRC})
-        SET(LIB_SRC ${LIB_SRC} ${F})
+        SET(LIB_SRC ${LIB_SRC} ${F}
+                sql/operator/update_logical_operator.h
+                sql/operator/update_logical_operator.cpp
+                sql/operator/update_physical_operator.h
+                sql/operator/update_physical_operator.cpp)
         MESSAGE("Use " ${F})
     ENDIF()
 

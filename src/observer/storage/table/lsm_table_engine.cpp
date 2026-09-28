@@ -41,5 +41,5 @@ RC LsmTableEngine::get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWri
 
 RC LsmTableEngine::open()
 {
-  return RC::UNIMPLEMENTED;
+  return RC::SUCCESS;  // 改成成功
 }

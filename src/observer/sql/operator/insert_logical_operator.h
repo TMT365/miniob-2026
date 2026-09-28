@@ -14,8 +14,10 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#include "operator_node.h"
 #include "sql/operator/logical_operator.h"
 #include "sql/parser/parse_defs.h"
+class Table;
 
 /**
  * @brief 插入逻辑算子
@@ -29,7 +31,7 @@ public:
 
   LogicalOperatorType type() const override { return LogicalOperatorType::INSERT; }
 
-  OpType get_op_type() const override { return OpType::LOGICALINSERT; }
+  OpType get_op_type() const override  { return OpType::LOGICALINSERT; }
 
   Table               *table() const { return table_; }
   const vector<Value> &values() const { return values_; }

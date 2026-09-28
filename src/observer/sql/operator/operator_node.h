@@ -64,7 +64,7 @@ enum class OpType
 
 // TODO: OperatorNode is the abstrace class of logical/physical operator
 // in cascade there is EXPR to include OperatorNode and OperatorNode children
-// so here remove genral_children.
+// so here remove general_children.
 class OperatorNode
 {
 public:
@@ -93,6 +93,7 @@ public:
    * TODO: complete it if needed
    */
   virtual uint64_t hash() const { return std::hash<int>()(static_cast<int>(get_op_type())); }
+
   virtual bool     operator==(const OperatorNode &other) const
   {
     if (get_op_type() != other.get_op_type())

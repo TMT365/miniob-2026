@@ -61,6 +61,8 @@ enum class ExprType
  * 值，比如ValueExpr。
  *
  * TODO 区分unbound和bound的表达式
+ * unbound Expression 是在解析阶段（AST 抽象语法树），无法确定字段 filed 对应的那张表，以及字段的类型和长度等信息的表达式，比如UnboundFieldExpr
+ * bound Expression 就是通过binder阶段，解析出字段 filed 对应的那张表，以及字段的类型和长度等信息的表达式，比如FieldExpr
  */
 class Expression
 {
