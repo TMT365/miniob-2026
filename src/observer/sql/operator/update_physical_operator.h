@@ -24,7 +24,7 @@ class UpdatePhysicalOperator : public PhysicalOperator
 {
 public:
   UpdatePhysicalOperator(Table *table, unique_ptr<Field> field, const Value *value, FilterStmt *filter_stmt);
-  virtual ~UpdatePhysicalOperator() = default;
+  virtual ~UpdatePhysicalOperator();
 
   PhysicalOperatorType type() const override { return PhysicalOperatorType::UPDATE; }
 
