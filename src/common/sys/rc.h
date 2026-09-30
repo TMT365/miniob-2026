@@ -84,7 +84,9 @@ See the Mulan PSL v2 for more details. */
   DEFINE_RC(INVALID_TOKEN)               \
   DEFINE_RC(UNEXPECTED_END_OF_STRING)    \
   DEFINE_RC(SYNTAX_ERROR)                \
-  DEFINE_RC(UNSUPPORTED)
+  DEFINE_RC(UNSUPPORTED)                 \
+  DEFINE_RC(CANNOT_TO_SWITCH_TYPE)       \
+  DEFINE_RC(VALUE_TOO_LONG)
 
 enum class RC
 {
