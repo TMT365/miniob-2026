@@ -40,3 +40,29 @@ UPDATE Update_table_1 SET t_name='N01' WHERE id=100;
 
 -- echo 10. update with invalid value
 UPDATE Update_table_1 SET col1='N01' WHERE id=1;
+
+-- echo 11. int to char
+UPDATE Update_table_1 SET t_name=1 WHERE id=1;
+-- sort SELECT * FROM Update_table_1;
+
+-- echo 12. int to char with too long character
+UPDATE Update_table_1 SET t_name='tangmingtao' WHERE id=1;
+
+-- echo 13. float to int
+UPDATE Update_table_1 SET col1=1.5 WHERE id=1;
+-- sort SELECT * FROM Update_table_1;
+
+-- echo 14. float to int with too long value
+UPDATE Update_table_1 SET col2=10000000000.5 WHERE id=1;
+-- sort SELECT * FROM Update_table_1;
+
+-- echo 14. negative int to char
+UPDATE Update_table_1 SET t_name=-1 WHERE id=2;
+-- sort SELECT * FROM Update_table_1;
+
+-- echo 15. char which has a negation sign to int
+UPDATE Update_table_1 SET col1='-1' WHERE id=2;
+-- sort SELECT * FROM Update_table_1;
+
+-- echo ==============================
+-- echo multi-field update
