@@ -78,8 +78,12 @@ public:
 
   /**
    * @brief 将 val 转换为 type 类型，并将结果保存到 result 中
+   * 基于当前数据类型的实现，尝试将 val 转换为 type 类型，如果无法转换，返回 RC::UNSUPPORTED
+   * @param val 待转换的值
+   * @param type 目标类型
+   * @param result 转换后的结果
    */
-  virtual RC cast_to(const Value &val, AttrType type, Value &result) const { return RC::UNSUPPORTED; }
+  virtual RC cast_to(const Value &val, AttrType type, Value &result) const {return RC::UNSUPPORTED; }
 
   /**
    * @brief 将 val 转换为 string，并将结果保存到 result 中

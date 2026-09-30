@@ -33,4 +33,8 @@ public:
   int cast_cost(AttrType type) override;
 
   RC to_string(const Value &val, string &result) const override;
+private:
+  static bool my_atoi(const char *str, Value &result);
+  static bool my_atof(const char *str, Value &result);
+  static bool my_transform_to_dataTime(const char *str, Value &result) { return false;}
 };

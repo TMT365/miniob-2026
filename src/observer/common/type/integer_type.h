@@ -45,4 +45,9 @@ public:
   RC set_value_from_str(Value &val, const string &data) const override;
 
   RC to_string(const Value &val, string &result) const override;
+
+private:
+  bool static my_transform_to_char(const Value &val, Value &result);
+  bool static my_transform_to_float(const Value &val, Value &result);
+  bool static my_transform_to_dataTime(const Value &val, Value &result) {return false;}
 };

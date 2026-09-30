@@ -17,6 +17,8 @@ See the Mulan PSL v2 for more details. */
 #include "common/value.h"
 #include "storage/common/column.h"
 
+#include <cmath>
+
 int FloatType::compare(const Value &left, const Value &right) const
 {
   ASSERT(left.attr_type() == AttrType::FLOATS, "left type is not float");
@@ -91,4 +93,69 @@ RC FloatType::to_string(const Value &val, string &result) const
   ss << common::double_to_str(val.value_.float_value_);
   result = ss.str();
   return RC::SUCCESS;
+}
+
+RC FloatType::cast_to(const Value &val, AttrType type, Value &result) const
+{
+    switch (type) {
+        case AttrType::CHARS: {
+        if (!my_transform_to_char(val, result)) {
+            return RC::CANNOT_TO_SWITCH_TYPE;
+        }
+        } break;
+        case AttrType::INTS: {
+        if (!my_transform_to_int(val, result)) {
+            return RC::CANNOT_TO_SWITCH_TYPE;
+        }
+        } break;
+        default: {
+        return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+        } break;
+    }
+    return RC::SUCCESS;
+}
+
+bool FloatType::my_transform_to_char(const Value &val, Value &result)
+{
+  float f = val.get_float();
+  std::string s = std::to_string(f);
+  // 可选：std::to_string默认输出6位小数，例如 5 → "5.000000"
+  // 如果评测要求去掉末尾多余的0和小数点，需要额外裁剪
+  if (!s.empty()) {
+    return false;
+  }
+  size_t len = s.size();
+  const char *start = s.c_str();
+  const char *end = start + len;
+  // 去掉末尾的0和小数点
+  while (len > 0 && (*end == '0' || *end == '.')) {
+    --end;
+    --len;
+  }
+  // 计算截取后的字符数量
+  size_t new_len = end - start + 1;
+
+  result.set_string(start,static_cast<int>(new_len));
+  return true;
+  return true;
+}
+
+bool FloatType::my_transform_to_int(const Value &val, Value &result)
+{
+  const double INT_MAX_D = 2147483647.0;
+  const double INT_MIN_D = -2147483648.0;
+  float f = val.get_float();
+  // 先判断NaN、无穷
+  if (!std::isfinite(f)) {
+    LOG_WARN("float is nan or inf, cannot cast to int");
+    return false;
+  }
+  // 范围检查
+  if (f < INT_MIN_D || f > INT_MAX_D) {
+    LOG_WARN("float value out of int32 range");
+    return false;
+  }
+  int int_val = static_cast<int>(f);
+  result.set_int(int_val);
+  return true;
 }
