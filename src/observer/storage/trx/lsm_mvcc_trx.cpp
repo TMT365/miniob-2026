@@ -37,8 +37,9 @@ RC LsmMvccTrx::delete_record(Table *table, Record &record)
   return table->delete_record_with_trx(record, this);
 }
 
-RC LsmMvccTrx::update_record(Table *table, Record &old_record, Record &new_record)
+RC LsmMvccTrx::update_record(Table *table, Record &old_record, Record &new_record, Field *field, const Value *value)
 {
+  // TODDO  unique_ptr<Field> field, const Value *value 并没有使用，还为实现事务的SQL操作
   return table->update_record_with_trx(old_record, new_record, this);
 }
 /**

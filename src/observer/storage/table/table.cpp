@@ -34,6 +34,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/record/lsm_record_scanner.h"
 #include "storage/table/heap_table_engine.h"
 #include "storage/table/lsm_table_engine.h"
+#include "src/common/sys/rc.h"
 
 Table::~Table()
 {
@@ -46,6 +47,7 @@ Table::~Table()
 RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, const char *base_dir,
     span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys, StorageFormat storage_format, StorageEngine storage_engine)
 {
+  // 检查参数合法性
   if (table_id < 0) {
     LOG_WARN("invalid table id. table_id=%d, table_name=%s", table_id, name);
     return RC::INVALID_ARGUMENT;
@@ -79,12 +81,12 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
   close(fd);
 
   // 创建文件
-  const vector<FieldMeta> *trx_fields = db->trx_kit().trx_fields();
+  const vector<FieldMeta> *trx_fields = db->trx_kit().trx_fields(); // 事务相关的字段，当前选择的事务管理器决定了是否需要这些字段, 如果不需要事务管理器，则为 nullptr, 也不会报错
   if ((rc = table_meta_.init(table_id, name, trx_fields, attributes, primary_keys, storage_format, storage_engine)) != RC::SUCCESS) {
     LOG_ERROR("Failed to init table meta. name:%s, ret:%d", name, rc);
     return rc;  // delete table file
   }
-
+  // fstream 打开文件
   fstream fs;
   fs.open(path, ios_base::out | ios_base::binary);
   if (!fs.is_open()) {
@@ -96,11 +98,11 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
   table_meta_.serialize(fs);
   fs.close();
 
-  db_       = db;
-
-  string             data_file = table_data_file(base_dir, name);
-  BufferPoolManager &bpm       = db->buffer_pool_manager();
-  rc                           = bpm.create_file(data_file.c_str());
+  db_ = db;
+  string data_file = table_data_file(base_dir, name);
+  // 获取数据库的 BufferPoolManager
+  BufferPoolManager &bpm = db->buffer_pool_manager();
+  rc = bpm.create_file(data_file.c_str());
   if (rc != RC::SUCCESS) {
     LOG_ERROR("Failed to create disk buffer pool of data file. file name=%s", data_file.c_str());
     return rc;
@@ -142,7 +144,7 @@ RC Table::open(Db *db, const char *meta_file, const char *base_dir)
   }
   fs.close();
 
-  db_       = db;
+  db_ = db;
 
   // // 加载数据文件
   // RC rc = init_record_handler(base_dir);
@@ -187,6 +189,17 @@ RC Table::visit_record(const RID &rid, function<bool(Record &)> visitor)
   return engine_->visit_record(rid, visitor);
 }
 
+RC Table::update_record(const Record &old_record, Record &new_record,Field *field, const Value *value)
+{
+  // 把旧记录复制一份到新记录里面
+  RC rc = make_record(old_record, new_record, field, value);
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to make new record for update. table name:%s, ret:%d", table_meta_.name(), strrc(rc));
+    return rc;
+  }
+  return engine_->update_record(old_record, new_record);
+}
+
 RC Table::insert_record_with_trx(Record &record, Trx *trx)
 {
   return engine_->insert_record_with_trx(record, trx);
@@ -213,12 +226,13 @@ const TableMeta &Table::table_meta() const { return table_meta_; }
 RC Table::make_record(int value_num, const Value *values, Record &record)
 {
   RC rc = RC::SUCCESS;
-  // 检查字段类型是否一致
+  // TODO 这种检查方式，依旧是全部字段都需要传入，后续可以考虑只传入部分字段，其他字段使用默认值
   if (value_num + table_meta_.sys_field_num() != table_meta_.field_num()) {
     LOG_WARN("Input values don't match the table's schema, table name:%s", table_meta_.name());
     return RC::SCHEMA_FIELD_MISSING;
   }
 
+  // 在表中，前几个字段是事务相关的字段，后面才是用户定义的字段，所以需要跳过事务相关的字段
   const int normal_field_start_index = table_meta_.sys_field_num();
   // 复制所有字段的值
   int   record_size = table_meta_.record_size();
@@ -251,11 +265,63 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
   return RC::SUCCESS;
 }
 
+// 重载一个 make_record
+RC Table::make_record(const Record &old_record, Record &new_record, Field *field, const Value *value)
+{
+  // 先获取旧字段里面的原数据
+  const char *old_data = old_record.data();
+  int record_size = table_meta_.record_size();
+
+  // 分配新记录的内存
+  char *new_data = (char *)malloc(record_size);
+  if (new_data == nullptr) {
+    LOG_WARN("failed to allocate memory for new record");
+    return RC::NOMEM;
+  }
+  memcpy(new_data, old_data, record_size);
+
+  // 获取要更新的字段的元信息
+  const FieldMeta *field_meta = field->meta();
+
+  LOG_INFO("create_new_record called, field_name=%s", field_meta->name());
+
+  // 处理值类型转换
+  const Value *real_value = value;
+  Value converted_value;
+  if (value->attr_type() != field_meta->type()) {
+    // 进行类型转换
+    RC rc = Value::cast_to(*value, field_meta->type(), converted_value);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to cast value. field type=%d, value type=%d", field_meta->type(), value->attr_type());
+      free(new_data);
+      return rc;
+    }
+    real_value = &converted_value;
+  }
+  // 把新值写入新记录的指定字段位置
+  RC rc = set_value_to_record(new_data, *real_value, field_meta);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to set value to new record: %s", strrc(rc));
+    free(new_data);
+    return rc;
+  }
+
+  // 新记录设置数据
+  new_record.set_data_owner(new_data, record_size);
+  new_record.set_rid(old_record.rid());
+  return RC::SUCCESS;
+}
+
 RC Table::set_value_to_record(char *record_data, const Value &value, const FieldMeta *field)
 {
   size_t       copy_len = field->len();
   const size_t data_len = value.length();
   if (field->type() == AttrType::CHARS) {
+    if (data_len > copy_len) {
+      LOG_WARN("value too long for field %s, field_len=%zu, value_len=%zu",
+               field->name(), copy_len, data_len);
+      return RC::VALUE_TOO_LONG;
+    }
     if (copy_len > data_len) {
       copy_len = data_len + 1;
     }

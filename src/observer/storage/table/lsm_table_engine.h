@@ -31,6 +31,7 @@ public:
   RC insert_record(Record &record) override;
   RC insert_chunk(const Chunk &chunk) override { return RC::UNIMPLEMENTED; }
   RC delete_record(const Record &record) override { return RC::UNIMPLEMENTED; }
+  RC update_record(const Record &old_record, Record &new_record) override { return RC::UNIMPLEMENTED; }
   RC insert_record_with_trx(Record &record, Trx *trx) override { return RC::UNIMPLEMENTED; }
   RC delete_record_with_trx(const Record &record, Trx *trx) override { return RC::UNIMPLEMENTED; }
   RC update_record_with_trx(const Record &old_record, const Record &new_record, Trx *trx) override

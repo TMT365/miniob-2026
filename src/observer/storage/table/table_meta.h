@@ -35,20 +35,36 @@ public:
 
   void swap(TableMeta &other) noexcept;
 
+  /**
+   *
+   * @param table_id 表ID
+   * @param name 表名
+   * @param trx_fields 事务相关的字段，当前选择的事务管理器决定了是否需要这些字段, 如果不需要事务管理器，则为 nullptr, 也不会报错
+   * @param attributes 属性字段，类型是 AttrInfoSqlNode，包含字段名、类型、长度等信息
+   * @param primary_keys 表的主键字段名列表
+   * @param storage_format 存储格式
+   * @param storage_engine 存储引擎，当前支持 HEAP、LSM 等
+   * @return
+   */
   RC init(int32_t table_id, const char *name, const vector<FieldMeta> *trx_fields,
       span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys, StorageFormat storage_format,
       StorageEngine storage_engine);
 
+  /**
+   * @brief 添加索引元数据
+   * @param index 索引元数据
+   * @return RC
+   */
   RC add_index(const IndexMeta &index);
 
-public:
+  // getters
   int32_t             table_id() const { return table_id_; }
   const char         *name() const;
   const FieldMeta    *trx_field() const;
   const FieldMeta    *field(int index) const;
   const FieldMeta    *field(const char *name) const;
   const FieldMeta    *find_field_by_offset(int offset) const;
-  auto                field_metas() const -> const vector<FieldMeta>                *{ return &fields_; }
+  auto                field_metas() const -> const vector<FieldMeta> *{ return &fields_; }
   auto                trx_fields() const -> span<const FieldMeta>;
   const StorageFormat storage_format() const { return storage_format_; }
   const StorageEngine storage_engine() const { return storage_engine_; }
@@ -65,7 +81,6 @@ public:
 
   int record_size() const;
 
-public:
   int  serialize(ostream &os) const override;
   int  deserialize(istream &is) override;
   int  get_serial_size() const override;
@@ -75,12 +90,12 @@ public:
 protected:
   int32_t           table_id_ = -1;
   string            name_;
-  vector<FieldMeta> trx_fields_;
+  vector<FieldMeta> trx_fields_;  // 事务相关的字段，看选择什么事务管理器了，Vacuous是nullptr
   vector<FieldMeta> fields_;  // 包含sys_fields
   vector<IndexMeta> indexes_;
   vector<string>    primary_keys_;
   StorageFormat     storage_format_;
-  StorageEngine     storage_engine_;
+  StorageEngine     storage_engine_;  // 存储引擎，有 HEAP、LSM 等
 
   int record_size_ = 0;
 };

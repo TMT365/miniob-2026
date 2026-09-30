@@ -35,6 +35,7 @@ class IndexScanner;
 class RecordDeleter;
 class Trx;
 class Db;
+class Field;
 
 /**
  * @brief 表
@@ -51,12 +52,16 @@ public:
   friend class HeapTableEngine;
 
   /**
-   * 创建一个表
-   * @param path 元数据保存的文件(完整路径)
+   * 创建一个表，数据的DDL语句执行时调用
+   * @param db 数据库对象
+   * @param table_id 表ID
+   * @param path 元数据保存的文件(完整路径) 【 .table 】
    * @param name 表名
-   * @param base_dir 表数据存放的路径
-   * @param attribute_count 字段个数
-   * @param attributes 字段
+   * @param base_dir 表数据存放的路径   【 .data 】
+   * @param attributes 字段定义列表
+   * @param primary_keys 主键字段名列表
+   * @param storage_format 存储格式
+   * @param storage_engine 存储引擎
    */
   RC create(Db *db, int32_t table_id, const char *path, const char *name, const char *base_dir,
       span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys, StorageFormat storage_format,
@@ -78,6 +83,9 @@ public:
    */
   RC make_record(int value_num, const Value *values, Record &record);
 
+  // 重载
+  RC make_record(const Record &old_record, Record &new_record, Field *field, const Value *value);
+
   /**
    * @brief 在当前的表中插入一条记录
    * @details 在表文件和索引中插入关联数据。这里只管在表中插入数据，不关心事务相关操作。
@@ -86,11 +94,30 @@ public:
   RC insert_record(Record &record);
 
   RC insert_chunk(const Chunk &chunk);
+
   RC delete_record(const Record &record);
+
+   /**
+   * 更新时，先复制旧记录的内容到新记录中，然后修改新记录的内容，最后调用此方法更新表和索引中的数据
+   * @param old_record 旧记录
+   * @param new_record 新记录
+   * @param field 要更新的字段
+   * @param value 要更新的字段的值
+   * @return RC
+   */
+  RC update_record(const Record &old_record, Record &new_record,Field *field, const Value *value);
 
   RC insert_record_with_trx(Record &record, Trx *trx);
   RC delete_record_with_trx(const Record &record, Trx *trx);
+  /**
+  * 更新时，先复制旧记录的内容到新记录中，然后修改新记录的内容，最后调用此方法更新表和索引中的数据。不直接修改旧记录的内容。是为了
+  * 保证在事务中，旧记录的内容不会被修改，其他事务可以继续访问旧记录的内容。
+  * @param old_record 旧记录
+  * @param new_record 新记录
+  * @return RC
+  */
   RC update_record_with_trx(const Record &old_record, const Record &new_record, Trx *trx);
+
   RC get_record(const RID &rid, Record &record);
 
   // TODO refactor
@@ -122,6 +149,13 @@ public:
   RC sync();
 
 private:
+  /**
+   * 一个用来插入字段值到记录的函数，主要是为了方便在 make_record、insert_record 中使用
+   * @param record_data 记录的地址
+   * @param value 要插入字段的值
+   * @param field 插入字段的元数据，包括大小、偏移量等
+   * @return RC
+   */
   RC set_value_to_record(char *record_data, const Value &value, const FieldMeta *field);
 
 private:

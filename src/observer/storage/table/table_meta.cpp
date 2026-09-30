@@ -77,6 +77,7 @@ RC TableMeta::init(int32_t table_id, const char *name, const vector<FieldMeta> *
 
     trx_field_num = static_cast<int>(trx_fields->size());
   } else {
+    // 没有事务相关字段，如使用了 VacuousTrxKit
     fields_.resize(attributes.size());
   }
 

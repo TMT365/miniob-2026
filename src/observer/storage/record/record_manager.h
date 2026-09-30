@@ -45,6 +45,7 @@ class Table;
  * 如何标识一个记录，或者定位一个记录？
  * 使用RID，即record identifier。使用 page num 表示所在的页面，slot num 表示当前在页面中的位置。因为这里的
  * 记录都是定长的，所以根据slot num 可以直接计算出记录的起始位置。
+ *
  * 问题1：那么如果记录不是定长的，还能使用 slot num 吗？
  * 问题2：如何更有效地存放不定长数据呢？
  * 问题3：如果一个页面不能存放一个记录，那么怎么组织记录存放效果更好呢？
@@ -386,6 +387,8 @@ public:
    * @param rid 待删除记录的标识符
    */
   RC delete_record(const RID *rid);
+
+  RC update_record(const RID *rid, const char *data);
 
   /**
    * @brief 插入一个新的记录到指定文件中，并返回该记录的标识符

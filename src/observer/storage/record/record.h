@@ -109,6 +109,7 @@ public:
     }
   }
 
+  // 拷贝构造
   Record(const Record &other)
   {
     rid_   = other.rid_;
@@ -142,6 +143,10 @@ public:
     return *this;
   }
 
+  /**
+   * @brief 移动构造
+   * @details 移动构造函数用于将一个右值对象的资源移动到当前对象，而不是进行深拷贝。
+   */
   Record(Record &&other)
   {
     rid_ = other.rid_;
@@ -260,9 +265,9 @@ public:
   const string &key() const { return key_; }
 
 private:
-  RID    rid_;
-  string key_;  //// 记录的主键，用于 lsm-tree 引擎，需要考虑重构 Record
-  char  *data_  = nullptr;
-  int    len_   = 0;      /// 如果不是record自己来管理内存，这个字段可能是无效的
-  bool   owner_ = false;  /// 表示当前是否由record来管理内存
+  RID    rid_;  ///< 表示记录在文件中的位置，包含页号和槽位号，便于直接使用公式 首地址+ 页号 * 页大小 + 槽位号 * 记录大小 来计算记录的内存地址
+  string key_;  ////< 记录的主键，用于 lsm-tree 引擎，需要考虑重构 Record
+  char  *data_  = nullptr; ///< 记录的内存地址，通常是指向页面上的内存地址，便于直接访问记录的内容
+  int    len_   = 0;      ///< 如果不是record自己来管理内存，这个字段可能是无效的 \\/< 记录的内存大小，便于直接访问记录的内容
+  bool   owner_ = false;  ///< 表示当前是否由record来管理内存
 };

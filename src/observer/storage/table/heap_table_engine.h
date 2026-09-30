@@ -31,6 +31,7 @@ public:
   RC delete_record(const Record &record) override;
   RC insert_record_with_trx(Record &record, Trx *trx) override { return RC::UNSUPPORTED; }
   RC delete_record_with_trx(const Record &record, Trx *trx) override { return RC::UNSUPPORTED; }
+  RC update_record(const Record &old_record, Record &new_record) override;
   RC update_record_with_trx(const Record &old_record, const Record &new_record, Trx *trx) override;
   RC get_record(const RID &rid, Record &record) override;
 
@@ -53,7 +54,7 @@ private:
 private:
   DiskBufferPool    *data_buffer_pool_ = nullptr;  /// 数据文件关联的buffer pool
   RecordFileHandler *record_handler_   = nullptr;  /// 记录操作
-  vector<Index *>    indexes_;
+  vector<Index *>    indexes_;  /// 维护所有的索引
   Db                *db_;
   Table             *table_;
 };

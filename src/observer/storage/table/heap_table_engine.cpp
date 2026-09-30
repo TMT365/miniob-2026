@@ -90,6 +90,55 @@ RC HeapTableEngine::get_record(const RID &rid, Record &record)
   return rc;
 }
 
+RC HeapTableEngine::update_record(const Record &old_record, Record &new_record)
+{
+  // 1. 删除旧记录的索引
+  RC rc = delete_entry_of_indexes(old_record.data(), old_record.rid(), false /* error_on_not_exists */);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to delete old record indexes. rid=%s, table=%s, rc=%s",
+             old_record.rid().to_string().c_str(), table_meta_->name(), strrc(rc));
+    return rc;
+  }
+
+  // 2. 原地更新记录数据（保持 RID 不变）
+  rc = record_handler_->update_record(&old_record.rid(), new_record.data());
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to update record in place. rid=%s, table=%s, rc=%s",
+             old_record.rid().to_string().c_str(), table_meta_->name(), strrc(rc));
+    return rc;
+  }
+
+  // 3. 插入新记录的索引
+  rc = insert_entry_of_indexes(new_record.data(), old_record.rid());
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to insert new record indexes. rid=%s, table=%s, rc=%s",
+             old_record.rid().to_string().c_str(), table_meta_->name(), strrc(rc));
+
+    // 4. 回滚操作：删除新记录的索引，恢复旧记录的索引
+    RC rc2 = delete_entry_of_indexes(new_record.data(), old_record.rid(), false);
+    if (rc2 != RC::SUCCESS) {
+      LOG_ERROR("Failed to rollback new record indexes after insert failed. rid=%s, table=%s, rc=%d:%s",
+                old_record.rid().to_string().c_str(), table_meta_->name(), rc2, strrc(rc2));
+    }
+    // 5. 回滚操作：恢复旧记录的索引
+    rc2 = insert_entry_of_indexes(old_record.data(), old_record.rid());
+    if (rc2 != RC::SUCCESS) {
+        LOG_ERROR("Failed to rollback old record indexes after insert failed. rid=%s, table=%s, rc=%d:%s",
+                    old_record.rid().to_string().c_str(), table_meta_->name(), rc2, strrc(rc2));
+    }
+    // 6. 回滚操作：恢复旧记录的数据
+    rc2 = record_handler_->update_record(&old_record.rid(), old_record.data());
+    if (rc2 != RC::SUCCESS) {
+        LOG_ERROR("Failed to rollback old record data after insert failed. rid=%s, table=%s, rc=%d:%s",
+                    old_record.rid().to_string().c_str(), table_meta_->name(), rc2, strrc(rc2));
+    }
+    LOG_INFO("Record updated successfully.");
+    return rc;
+  }
+
+  return RC::SUCCESS;
+}
+
 RC HeapTableEngine::delete_record(const Record &record)
 {
   RC rc = RC::SUCCESS;
