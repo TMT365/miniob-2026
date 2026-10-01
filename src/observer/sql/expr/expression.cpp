@@ -308,13 +308,13 @@ RC ConjunctionExpr::get_value(const Tuple &tuple, Value &value) const
       return rc;
     }
     bool bool_value = tmp_value.get_boolean();
-    if ((conjunction_type_ == Type::AND && !bool_value) || (conjunction_type_ == Type::OR && bool_value)) {
+    if ((conjunction_type_ == Type::AND_EXPR && !bool_value) || (conjunction_type_ == Type::OR_EXPR && bool_value)) {
       value.set_boolean(bool_value);
       return rc;
     }
   }
 
-  bool default_value = (conjunction_type_ == Type::AND);
+  bool default_value = (conjunction_type_ == Type::AND_EXPR);
   value.set_boolean(default_value);
   return rc;
 }
@@ -470,6 +470,14 @@ RC ArithmeticExpr::get_value(const Tuple &tuple, Value &value) const
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
     return rc;
+  }
+  // 如果是 Type::NEGATIVE 是没有右表达式的
+  if (arithmetic_type_ == Type::NEGATIVE || right_ == nullptr) {
+    // 构造类型是 Value 值是0 的常量返回
+    // TODO 可以在改进一下
+    Value Zero;
+    Zero.set_int(0);
+    return calc_value(left_value, Zero, value);
   }
   rc = right_->get_value(tuple, right_value);
   if (rc != RC::SUCCESS) {
