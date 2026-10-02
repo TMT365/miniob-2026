@@ -1,5 +1,5 @@
 INITIALIZATION
-CREATE TABLE Update_table_1(id int, t_name char, col1 int, col2 int);
+CREATE TABLE Update_table_1(id int, t_name char(4), col1 int, col2 int);
 SUCCESS
 CREATE INDEX index_id on Update_table_1(id);
 SUCCESS
@@ -131,3 +131,35 @@ ID | T_NAME | COL1 | COL2
 
 ==============================
 MULTI-FIELD UPDATE
+
+1. UPDATE A ROW
+UPDATE Update_table_1 SET t_name='N01', col1=10, col2=col1 + 1 WHERE 1 = 1;
+SUCCESS
+SELECT * FROM Update_table_1;
+1 | N01 | 10 | 2
+2 | N01 | 10 | 0
+4 | N01 | 10 | 1
+ID | T_NAME | COL1 | COL2
+
+2. UPDATE A ROW
+UPDATE Update_table_1 SET t_name='N02', col1=20, col2=-(col1 + 2) WHERE col1=10;
+SUCCESS
+SELECT * FROM Update_table_1;
+1 | N02 | 20 | -12
+2 | N02 | 20 | -12
+4 | N02 | 20 | -12
+ID | T_NAME | COL1 | COL2
+
+3. COMMON INDEX (ALLOW AT LEAST RECORDS HAVE THE SAME INDEX VALUE)
+UPDATE Update_table_1 SET id=2 WHERE id=1;
+SUCCESS
+SELECT * FROM Update_table_1;
+2 | N02 | 20 | -12
+2 | N02 | 20 | -12
+4 | N02 | 20 | -12
+ID | T_NAME | COL1 | COL2
+
+4. UNIQUE INDEX CONFLICT
+CREATE UNIQUE INDEX unique_id ON Update_table_1(id);
+FAILURE
+=====================================================

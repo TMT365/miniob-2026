@@ -1,5 +1,5 @@
 -- echo initialization
-CREATE TABLE Update_table_1(id int, t_name char, col1 int, col2 int);
+CREATE TABLE Update_table_1(id int, t_name char(4), col1 int, col2 int);
 CREATE INDEX index_id on Update_table_1(id);
 INSERT INTO Update_table_1 VALUES (1,'N1',1,1);
 INSERT INTO Update_table_1 VALUES (2,'N2',1,1);
@@ -66,3 +66,19 @@ UPDATE Update_table_1 SET col1='-1' WHERE id=2;
 
 -- echo ==============================
 -- echo multi-field update
+
+-- echo 1. update a row
+UPDATE Update_table_1 SET t_name='N01', col1=10, col2=col1 + 1 WHERE 1 = 1;
+-- sort SELECT * FROM Update_table_1;
+
+-- echo 2. update a row
+UPDATE Update_table_1 SET t_name='N02', col1=20, col2=-(col1 + 2) WHERE col1=10;
+-- sort SELECT * FROM Update_table_1;
+
+-- echo 3. common index (allow at least records have the same index value)
+UPDATE Update_table_1 SET id=2 WHERE id=1;
+-- sort SELECT * FROM Update_table_1;
+
+-- echo 4. unique index conflict
+CREATE UNIQUE INDEX unique_id ON Update_table_1(id);
+-- echo =====================================================
