@@ -3,8 +3,15 @@
 //
 #include "update_logical_operator.h"
 
+
+// 新增构造函数
 UpdateLogicalOperator::UpdateLogicalOperator(
   Table *table,
-  unique_ptr<Field> field,
-  const Value *value, FilterStmt *filter_stmt
-  ): table_(table), field_(std::move(field)), value_(value), filter_stmt_(filter_stmt) {}
+  vector<unique_ptr<Field>> &&fields,
+  vector<Value> &&values,
+  vector<unique_ptr<Expression>> &&exprs,
+  int value_mount,
+  FilterStmt *filter_stmt
+  ): table_(table), fields_(std::move(fields)),value_mount_(value_mount), filter_stmt_(filter_stmt),
+    values_(std::move(values)),exprs_(std::move(exprs))
+{}
