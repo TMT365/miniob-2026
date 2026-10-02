@@ -32,5 +32,9 @@ RC CreateIndexExecutor::execute(SQLStageEvent *sql_event)
 
   Trx   *trx   = session->current_trx();
   Table *table = create_index_stmt->table();
-  return table->create_index(trx, create_index_stmt->field_meta(), create_index_stmt->index_name().c_str());
+  /**
+   * 父类指针只能使用父类有的函数，想使用子类的独有函数，要使用动态转换 dynamic_cast<Child*>(ptr)
+   *
+   */
+  return table->create_index(trx, create_index_stmt->field_meta(), create_index_stmt->index_name().c_str(),dynamic_cast<CreateIndexStmt*>(stmt)->index_type());
 }
