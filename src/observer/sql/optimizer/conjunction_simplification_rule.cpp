@@ -49,7 +49,7 @@ RC ConjunctionSimplificationRule::rewrite(unique_ptr<Expression> &expr, bool &ch
       continue;
     }
 
-    if (conjunction_expr->conjunction_type() == ConjunctionExpr::Type::AND) {
+    if (conjunction_expr->conjunction_type() == ConjunctionExpr::Type::AND_EXPR) {
       if (constant_value == true) {
         child_exprs.erase(iter);
       } else {

@@ -95,7 +95,7 @@ RC PredicatePushdownRewriter::get_exprs_can_pushdown(
   if (expr->type() == ExprType::CONJUNCTION) {
     ConjunctionExpr *conjunction_expr = static_cast<ConjunctionExpr *>(expr.get());
     // 或 操作的比较，太复杂，现在不考虑
-    if (conjunction_expr->conjunction_type() == ConjunctionExpr::Type::OR) {
+    if (conjunction_expr->conjunction_type() == ConjunctionExpr::Type::OR_EXPR) {
       LOG_WARN("unsupported or operation");
       rc = RC::UNIMPLEMENTED;
       return rc;
