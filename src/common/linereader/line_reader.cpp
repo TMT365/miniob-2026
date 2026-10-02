@@ -35,20 +35,41 @@ void MiniobLineReader::init(const std::string &history_file)
 std::string MiniobLineReader::my_readline(const std::string &prompt)
 {
   const char *cinput = nullptr;
-  cinput             = reader_.input(prompt);
-  if (cinput == nullptr) {
-    return "";
+
+  std::string full_input;
+  std::string current_prompt = prompt;
+
+  while (true) {
+    cinput = reader_.input(current_prompt);
+    if (cinput == nullptr) {
+      return full_input;
+    }
+
+    std::string line = cinput;
+    cinput           = nullptr;
+
+    if (line.empty()) {
+      return full_input;
+    }
+
+    if (!line.empty() && line.back() == '\\') {
+      line.pop_back();
+      full_input += line;
+      full_input += '\n';
+      current_prompt = "  -> ";
+      continue;
+    }
+
+    full_input += line;
+    break;
   }
 
-  std::string line = cinput;
-  cinput           = nullptr;
-
-  if (line.empty()) {
+  if (full_input.empty()) {
     return "";
   }
 
   bool is_valid_input = false;
-  for (auto c : line) {
+  for (auto c : full_input) {
     if (!isspace(c)) {
       is_valid_input = true;
       break;
@@ -56,11 +77,11 @@ std::string MiniobLineReader::my_readline(const std::string &prompt)
   }
 
   if (is_valid_input) {
-    reader_.history_add(line);
+    reader_.history_add(full_input);
     check_and_save_history();
   }
 
-  return line;
+  return full_input;
 }
 
 bool MiniobLineReader::is_exit_command(const std::string &cmd)
