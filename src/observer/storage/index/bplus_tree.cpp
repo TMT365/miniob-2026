@@ -1143,14 +1143,14 @@ bool BplusTreeHandler::validate_leaf_link(BplusTreeMiniTransaction &mtr)
       return false;
     }
 
-    LeafIndexNodeHandler leaf_node(mtr, file_header_, frame);
-    if (key_comparator_((char *)prev_key.get(), leaf_node.key_at(0)) >= 0) {
+    LeafIndexNodeHandler new_leaf_node(mtr, file_header_, frame);
+    if (key_comparator_((char *)prev_key.get(), new_leaf_node.key_at(0)) >= 0) {
       LOG_WARN("invalid page. current first key is not bigger than last");
       result = false;
     }
 
-    next_page_num = leaf_node.next_page();
-    memcpy(prev_key.get(), leaf_node.key_at(leaf_node.size() - 1), file_header_.key_length);
+    next_page_num = new_leaf_node.next_page();
+    memcpy(prev_key.get(), new_leaf_node.key_at(new_leaf_node.size() - 1), file_header_.key_length);
   }
 
   // can do more things

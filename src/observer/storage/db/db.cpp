@@ -27,6 +27,8 @@ See the Mulan PSL v2 for more details. */
 #include "storage/trx/trx.h"
 #include "storage/clog/disk_log_handler.h"
 #include "storage/clog/integrated_log_replayer.h"
+#include "src/common/lang/vector.h"
+#include "storage/index/index.h"
 
 using namespace common;
 
@@ -175,6 +177,45 @@ RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attribut
   LOG_INFO("Create table success. table name=%s, table_id:%d", table_name, table_id);
   return RC::SUCCESS;
 }
+
+RC Db::drop_table(const char *table_name)
+{
+  auto it = opened_tables_.find(table_name);
+  if (it == opened_tables_.end()) {
+    LOG_WARN("Table not found: %s", table_name);
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+  Table *table = it->second;
+
+  vector<string> files_to_remove;
+  files_to_remove.push_back(table_meta_file(path_.c_str(), table_name));
+  files_to_remove.push_back(table_data_file(path_.c_str(), table_name));
+  files_to_remove.push_back(table_lob_file(path_.c_str(), table_name));
+
+  vector<Index *> indexes;
+  table->find_all_index(indexes);
+  for (Index *index : indexes) {
+    files_to_remove.push_back(table_index_file(path_.c_str(), table_name, index->index_meta().name()));
+  }
+
+  for (const string &file_path : files_to_remove) {
+    if (filesystem::exists(file_path)) {
+      if (::remove(file_path.c_str()) != 0) {
+        LOG_ERROR("Failed to remove file: %s, errno=%d:%s", file_path.c_str(), errno, strerror(errno));
+        return RC::IOERR_CLOSE;
+      }
+    }
+  }
+
+  // 索引对象由 Table 析构链自动清理，不要在这里 delete
+  opened_tables_.erase(it);
+  delete table;
+
+
+  LOG_INFO("Drop table success. table name=%s", table_name);
+  return RC::SUCCESS;
+}
+
 
 Table *Db::find_table(const char *table_name) const
 {

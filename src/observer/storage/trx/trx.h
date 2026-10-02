@@ -146,6 +146,8 @@ public:
   virtual RC insert_record(Table *table, Record &record)                         = 0;
   virtual RC delete_record(Table *table, Record &record)                         = 0;
   virtual RC update_record(Table *table, Record &old_record, Record &new_record, Field *field, const Value *value) = 0;
+  // 新增：多字段更新时不传 field 和 value，因为 new_record 已经包含所有更新的值
+  virtual RC update_record(Table *table, Record &old_record, Record &new_record) = 0;
   virtual RC visit_record(Table *table, Record &record, ReadWriteMode mode)      = 0;
 
   virtual RC start_if_need() = 0;

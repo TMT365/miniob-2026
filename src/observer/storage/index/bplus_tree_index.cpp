@@ -90,6 +90,15 @@ RC BplusTreeIndex::delete_entry(const char *record, const RID *rid)
   return index_handler_.delete_entry(record + field_meta_.offset(), rid);
 }
 
+RC BplusTreeIndex::check_exists(const char *record, bool &exists)
+{
+  const char *key = record + field_meta_.offset();
+  list<RID> rids;
+  index_handler_.get_entry(key, field_meta_.len(), rids);
+  exists = !rids.empty();
+  return RC::SUCCESS;
+}
+
 IndexScanner *BplusTreeIndex::create_scanner(
     const char *left_key, int left_len, bool left_inclusive, const char *right_key, int right_len, bool right_inclusive)
 {
@@ -123,3 +132,4 @@ RC BplusTreeIndexScanner::destroy()
   delete this;
   return RC::SUCCESS;
 }
+

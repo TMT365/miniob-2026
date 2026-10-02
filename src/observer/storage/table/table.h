@@ -38,7 +38,7 @@ class Db;
 class Field;
 
 /**
- * @brief 表
+ * @brief 表, 定义了所有关于表的操作 DDL + DML
  *
  */
 class Table
@@ -67,6 +67,7 @@ public:
       span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys, StorageFormat storage_format,
       StorageEngine storage_engine);
 
+  RC drop_table(const char *table_name);
   /**
    * 打开一个表
    * @param meta_file 保存表元数据的文件完整路径
@@ -85,6 +86,17 @@ public:
 
   // 重载
   RC make_record(const Record &old_record, Record &new_record, Field *field, const Value *value);
+
+  // 新增：只复制旧记录到新记录，不修改任何字段
+  RC make_record(const Record &old_record, Record &new_record);
+
+  // 新增：多字段更新时，从旧记录创建新记录并设置多个字段的值
+  // @param old_record 旧记录
+  // @param new_record OUT: 新记录
+  // @param fields 要更新的字段数组
+  // @param values 对应的值数组
+  // @param value_num 字段数量
+  RC make_record(const Record &old_record, Record &new_record, const vector<Field *> &fields, const vector<Value> &values, int value_num);
 
   /**
    * @brief 在当前的表中插入一条记录
@@ -121,7 +133,7 @@ public:
   RC get_record(const RID &rid, Record &record);
 
   // TODO refactor
-  RC create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name);
+  RC create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name, const IndexType &index_type);
 
   RC get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWriteMode mode);
 
@@ -136,7 +148,6 @@ public:
    */
   RC visit_record(const RID &rid, function<bool(Record &)> visitor);
 
-public:
   int32_t     table_id() const { return table_meta_.table_id(); }
   const char *name() const;
 
@@ -148,22 +159,11 @@ public:
 
   RC sync();
 
-private:
-  /**
-   * 一个用来插入字段值到记录的函数，主要是为了方便在 make_record、insert_record 中使用
-   * @param record_data 记录的地址
-   * @param value 要插入字段的值
-   * @param field 插入字段的元数据，包括大小、偏移量等
-   * @return RC
-   */
-  RC set_value_to_record(char *record_data, const Value &value, const FieldMeta *field);
-
-private:
-  // RC init_record_handler(const char *base_dir);
-
-public:
   Index *find_index(const char *index_name) const;
   Index *find_index_by_field(const char *field_name) const;
+
+  RC find_all_index(vector<Index *> &indexes) const;
+  RC find_all_index_by_field_name(const char *field_name, vector<Index *> &out, IndexType *index_type = nullptr) const;
 
 private:
   Db       *db_ = nullptr;
@@ -173,4 +173,7 @@ private:
   // vector<Index *>    indexes_;
   unique_ptr<TableEngine> engine_      = nullptr;
   LobFileHandler         *lob_handler_ = nullptr;
+
+  // RC init_record_handler(const char *base_dir);
+  RC set_value_to_record(char *record_data, const Value &value, const FieldMeta *field);
 };

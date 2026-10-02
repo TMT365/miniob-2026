@@ -49,6 +49,17 @@ RC VacuousTrx::update_record(Table *table, Record &old_record, Record &new_recor
   return RC::SUCCESS;
 }
 
+RC VacuousTrx::update_record(Table *table, Record &old_record, Record &new_record)
+{
+  // 多字段更新：new_record 已经包含所有更新的值，直接调用 update_record_with_trx
+  RC rc = table->update_record_with_trx(old_record, new_record, this);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to update record. rc=%s", strrc(rc));
+    return rc;
+  }
+  return RC::SUCCESS;
+}
+
 RC VacuousTrx::visit_record(Table *table, Record &record, ReadWriteMode) { return RC::SUCCESS; }
 
 RC VacuousTrx::start_if_need() { return RC::SUCCESS; }

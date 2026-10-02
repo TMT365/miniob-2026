@@ -26,7 +26,13 @@ FOREACH (F ${ALL_SRC})
                 sql/operator/update_logical_operator.h
                 sql/operator/update_logical_operator.cpp
                 sql/operator/update_physical_operator.h
-                sql/operator/update_physical_operator.cpp)
+                sql/operator/update_physical_operator.cpp
+                common/type/index_type.h
+                common/type/index_type.cpp
+                sql/stmt/drop_table_stmt.cpp
+                sql/stmt/drop_table_stmt.h
+                sql/executor/drop_table_executor.h
+                sql/executor/drop_table_executor.cpp)
         MESSAGE("Use " ${F})
     ENDIF()
 

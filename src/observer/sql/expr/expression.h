@@ -350,8 +350,8 @@ class ConjunctionExpr : public Expression
 public:
   enum class Type
   {
-    AND,
-    OR
+    AND_EXPR,
+    OR_EXPR
   };
 
 public:
@@ -381,7 +381,7 @@ private:
 };
 
 /**
- * @brief 算术表达式
+ * @brief 算术表达式 -(field + 常量)
  * @ingroup Expression
  */
 class ArithmeticExpr : public Expression

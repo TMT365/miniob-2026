@@ -42,6 +42,13 @@ RC LsmMvccTrx::update_record(Table *table, Record &old_record, Record &new_recor
   // TODDO  unique_ptr<Field> field, const Value *value 并没有使用，还为实现事务的SQL操作
   return table->update_record_with_trx(old_record, new_record, this);
 }
+
+RC LsmMvccTrx::update_record(Table *table, Record &old_record, Record &new_record)
+{
+  // 多字段更新：new_record 已经包含所有更新的值
+  return table->update_record_with_trx(old_record, new_record, this);
+}
+
 /**
  * 在 index scan 中使用的，需要适配 index scan
  */

@@ -10,8 +10,14 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include "storage/index/index.h"
-#include "tokenizer/tokenizer.h"
+#include "common/sys/rc.h"
+#include "../index/index.h"
+#include "../index/index_meta.h"
+#include "../../../common/lang/vector.h"
+
+class Tokenizer;
+struct RID;
+class IndexMeta;
 
 /**
  * @brief fulltext 全文索引
@@ -23,11 +29,11 @@ public:
   FullTextIndex(){};
   virtual ~FullTextIndex() noexcept {};
 
-  RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
+  RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta) override
   {
     return RC::UNIMPLEMENTED;
-  };
-  RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
+  }
+  RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta) override
   {
     return RC::UNIMPLEMENTED;
   };
@@ -38,6 +44,7 @@ public:
 
   RC insert_entry(const char *record, const RID *rid) override { return RC::UNIMPLEMENTED; };
   RC delete_entry(const char *record, const RID *rid) override { return RC::UNIMPLEMENTED; };
+  RC check_exists(const char *record, bool &exists) override { return RC::UNIMPLEMENTED; };
 
   RC sync() override { return RC::UNIMPLEMENTED; };
 

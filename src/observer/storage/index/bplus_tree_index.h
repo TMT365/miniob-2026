@@ -33,6 +33,7 @@ public:
 
   RC insert_entry(const char *record, const RID *rid) override;
   RC delete_entry(const char *record, const RID *rid) override;
+  RC check_exists(const char *record, bool &exists) override;
 
   /**
    * 扫描指定范围的数据
@@ -41,6 +42,11 @@ public:
       int right_len, bool right_inclusive) override;
 
   RC sync() override;
+
+  bool is_vector_index() override
+  {
+    return false;
+  }
 
 private:
   bool             inited_ = false;

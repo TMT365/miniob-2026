@@ -28,11 +28,14 @@ HeapTableEngine::~HeapTableEngine()
     data_buffer_pool_ = nullptr;
   }
 
-  for (vector<Index *>::iterator it = indexes_.begin(); it != indexes_.end(); ++it) {
-    Index *index = *it;
-    delete index;
+  if (!indexes_.empty()) {
+    for (vector<Index *>::iterator it = indexes_.begin(); it != indexes_.end(); ++it) {
+      Index *index = *it;
+      delete index;
+    }
+    indexes_.clear();
   }
-  indexes_.clear();
+
 
   LOG_INFO("Table has been closed: %s", table_meta_->name());
 }
@@ -46,7 +49,7 @@ RC HeapTableEngine::insert_record(Record &record)
   }
 
   rc = insert_entry_of_indexes(record.data(), record.rid());
-  if (rc != RC::SUCCESS) {  // 可能出现了键值重复
+  if (rc != RC::SUCCESS) {  // 解决了索引重复问题
     RC rc2 = delete_entry_of_indexes(record.data(), record.rid(), false /*error_on_not_exists*/);
     if (rc2 != RC::SUCCESS) {
       LOG_ERROR("Failed to rollback index data when insert index entries failed. table name=%s, rc=%d:%s",
@@ -171,7 +174,7 @@ RC HeapTableEngine::get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadW
   return rc;
 }
 
-RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name)
+RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name,const IndexType &index_type)
 {
   if (common::is_blank(index_name) || nullptr == field_meta) {
     LOG_INFO("Invalid input arguments, table name is %s, index_name is blank or attribute_name is blank", table_meta_->name());
@@ -180,7 +183,7 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
 
   IndexMeta new_index_meta;
 
-  RC rc = new_index_meta.init(index_name, *field_meta);
+  RC rc = new_index_meta.init(index_name, *field_meta,index_type);
   if (rc != RC::SUCCESS) {
     LOG_INFO("Failed to init IndexMeta in table:%s, index_name:%s, field_name:%s", 
              table_meta_->name(), index_name, field_meta->name());
@@ -209,6 +212,21 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
 
   Record record;
   while (OB_SUCC(rc = scanner->next(record))) {
+    // UNIQUE/PRIMARY_KEY 索引在创建时检查字段值是否已有重复
+    if (index_type == IndexType::UNIQUE_INDEX || index_type == IndexType::PRIMARY_KEY) {
+      bool exists = false;
+      rc = index->check_exists(record.data(), exists);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to check exists while creating index. table=%s, index=%s, rc=%s",
+                 table_meta_->name(), index_name, strrc(rc));
+        return rc;
+      }
+      if (exists) {
+        LOG_WARN("duplicate key when creating unique index. table=%s, index=%s",
+                 table_meta_->name(), index_name);
+        return RC::RECORD_DUPLICATE_KEY;
+      }
+    }
     rc = index->insert_entry(record.data(), &record.rid());
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to insert record into index while creating index. table=%s, index=%s, rc=%s",
@@ -274,6 +292,18 @@ RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid)
 {
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
+    // 处理索引字段值冲突问题
+    if (index->index_meta().type() == IndexType::UNIQUE_INDEX || index->index_meta().type() == IndexType::PRIMARY_KEY) {
+      bool exists = false;
+      rc = index->check_exists(record, exists);
+      if (rc != RC::SUCCESS) {
+        return rc;
+      }
+      if (exists) {
+        LOG_WARN("[ unique index / primary key ] conflict, index=%s, field=%s",index->index_meta().name(), index->index_meta().field());
+        return RC::RECORD_DUPLICATE_KEY;
+      }
+    }
     rc = index->insert_entry(record, &rid);
     if (rc != RC::SUCCESS) {
       break;
@@ -366,6 +396,7 @@ Index *HeapTableEngine::find_index(const char *index_name) const
   }
   return nullptr;
 }
+// TODO 该函数只用于返回字段名检索的第一个索引，适合单索引类型题目，这里不适合校验索引唯一性
 Index *HeapTableEngine::find_index_by_field(const char *field_name) const
 {
   const IndexMeta *index_meta = table_meta_->find_index_by_field(field_name);
@@ -373,6 +404,31 @@ Index *HeapTableEngine::find_index_by_field(const char *field_name) const
     return this->find_index(index_meta->name());
   }
   return nullptr;
+}
+RC HeapTableEngine::find_all_index(vector<Index *> &indexes) const
+{
+  for (Index *index : indexes_) {
+    indexes.push_back(index);
+  }
+  return RC::SUCCESS;
+}
+/**
+ * 用于查询指定类型的索引，限单个字段，如果 index_type 是空，则返所有类型
+ * @param field_name 字段名
+ * @param out 输出的数组
+ * @param index_type 查询的索引类型
+ * @return RC
+ */
+RC HeapTableEngine::find_all_index_by_field_name(const char *field_name, vector<Index *> &out, IndexType *index_type) const
+{
+  for (Index *index : indexes_) {
+    if (0 == strcmp(index->index_meta().field(), field_name)) {
+      if (index_type == nullptr || *index_type == index->index_meta().type()) {
+        out.push_back(index);
+      }
+    }
+  }
+  return RC::SUCCESS;
 }
 
 RC HeapTableEngine::init()

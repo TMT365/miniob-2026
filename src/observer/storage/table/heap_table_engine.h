@@ -35,7 +35,7 @@ public:
   RC update_record_with_trx(const Record &old_record, const Record &new_record, Trx *trx) override;
   RC get_record(const RID &rid, Record &record) override;
 
-  RC create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name) override;
+  RC create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name, const IndexType &index_type) override;
   RC get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWriteMode mode) override;
   RC get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadWriteMode mode) override;
   RC visit_record(const RID &rid, function<bool(Record &)> visitor) override;
@@ -43,6 +43,8 @@ public:
 
   Index *find_index(const char *index_name) const override;
   Index *find_index_by_field(const char *field_name) const override;
+  RC find_all_index(vector<Index *> &indexes) const override;
+  RC find_all_index_by_field_name(const char *field_name, vector<Index *> &out, IndexType *index_type) const override;
   RC     open() override;
   // init_record_handler
   RC init() override;
@@ -54,7 +56,7 @@ private:
 private:
   DiskBufferPool    *data_buffer_pool_ = nullptr;  /// 数据文件关联的buffer pool
   RecordFileHandler *record_handler_   = nullptr;  /// 记录操作
-  vector<Index *>    indexes_;  /// 维护所有的索引
+  vector<Index *>    indexes_ ;  /// 维护所有的索引
   Db                *db_;
   Table             *table_;
 };

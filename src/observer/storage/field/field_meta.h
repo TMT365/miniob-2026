@@ -35,7 +35,6 @@ public:
 
   RC init(const char *name, AttrType attr_type, int attr_offset, int attr_len, bool visible, int field_id);
 
-public:
   const char *name() const;
   AttrType    type() const;
   int         offset() const;
@@ -43,10 +42,8 @@ public:
   bool        visible() const;
   int         field_id() const;
 
-public:
   void desc(ostream &os) const;
 
-public:
   void      to_json(Json::Value &json_value) const;
   static RC from_json(const Json::Value &json_value, FieldMeta &field);
 

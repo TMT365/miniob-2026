@@ -312,6 +312,73 @@ RC Table::make_record(const Record &old_record, Record &new_record, Field *field
   return RC::SUCCESS;
 }
 
+RC Table::make_record(const Record &old_record, Record &new_record)
+{
+  // 只复制旧记录到新记录，不修改任何字段
+  const char *old_data = old_record.data();
+  int record_size = table_meta_.record_size();
+
+  // 分配新记录的内存
+  char *new_data = (char *)malloc(record_size);
+  if (new_data == nullptr) {
+    LOG_WARN("failed to allocate memory for new record");
+    return RC::NOMEM;
+  }
+  memcpy(new_data, old_data, record_size);
+
+  // 新记录设置数据
+  new_record.set_data_owner(new_data, record_size);
+  new_record.set_rid(old_record.rid());
+  return RC::SUCCESS;
+}
+
+RC Table::make_record(const Record &old_record, Record &new_record, const vector<Field *> &fields, const vector<Value> &values, int value_num)
+{
+  // 多字段更新：从旧记录创建新记录并设置多个字段的值
+  const char *old_data = old_record.data();
+  int record_size = table_meta_.record_size();
+
+  // 分配新记录的内存
+  char *new_data = (char *)malloc(record_size);
+  if (new_data == nullptr) {
+    LOG_WARN("failed to allocate memory for new record");
+    return RC::NOMEM;
+  }
+  memcpy(new_data, old_data, record_size);
+
+  // 设置每个字段的值
+  for (int i = 0; i < value_num; i++) {
+    const FieldMeta *field_meta = fields[i]->meta();
+    const Value &value = values[i];
+
+    // 处理类型转换
+    const Value *real_value = &value;
+    Value converted_value;
+    if (value.attr_type() != field_meta->type()) {
+      RC rc = Value::cast_to(value, field_meta->type(), converted_value);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to cast value. field type=%d, value type=%d", field_meta->type(), value.attr_type());
+        free(new_data);
+        return rc;
+      }
+      real_value = &converted_value;
+    }
+
+    // 设置值到记录
+    RC rc = set_value_to_record(new_data, *real_value, field_meta);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to set value to record: %s", strrc(rc));
+      free(new_data);
+      return rc;
+    }
+  }
+
+  // 新记录设置数据
+  new_record.set_data_owner(new_data, record_size);
+  new_record.set_rid(old_record.rid());
+  return RC::SUCCESS;
+}
+
 RC Table::set_value_to_record(char *record_data, const Value &value, const FieldMeta *field)
 {
   size_t       copy_len = field->len();
@@ -340,9 +407,9 @@ RC Table::get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadWriteMode m
   return engine_->get_chunk_scanner(scanner, trx, mode);
 }
 
-RC Table::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name)
+RC Table::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name, const IndexType &index_type)
 {
-  return engine_->create_index(trx, field_meta, index_name);
+  return engine_->create_index(trx, field_meta, index_name,index_type);
 }
 
 RC Table::delete_record(const Record &record)
@@ -357,6 +424,14 @@ Index *Table::find_index(const char *index_name) const
 Index *Table::find_index_by_field(const char *field_name) const
 {
   return engine_->find_index_by_field(field_name);
+}
+RC Table::find_all_index(vector<Index *> &indexes) const
+{
+  return engine_->find_all_index(indexes);
+}
+RC Table::find_all_index_by_field_name(const char *field_name, vector<Index *> &out, IndexType *index_type) const
+{
+  return engine_->find_all_index_by_field_name(field_name,out,index_type);
 }
 
 RC Table::sync()

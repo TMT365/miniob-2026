@@ -16,6 +16,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/sys/rc.h"
 #include "common/lang/string.h"
+#include "./observer/common/type/index_type.h"
 
 class TableMeta;
 class FieldMeta;
@@ -35,11 +36,12 @@ class IndexMeta
 public:
   IndexMeta() = default;
 
-  RC init(const char *name, const FieldMeta &field);
+  RC init(const char *name, const FieldMeta &field, IndexType type);
 
 public:
   const char *name() const;
   const char *field() const;
+  const IndexType &type() const;
 
   void desc(ostream &os) const;
 
@@ -47,7 +49,9 @@ public:
   void      to_json(Json::Value &json_value) const;
   static RC from_json(const TableMeta &table, const Json::Value &json_value, IndexMeta &index);
 
+// 保护字段可以被子类使用
 protected:
   string name_;   // index's name
   string field_;  // field's name
+  IndexType type_;
 };
