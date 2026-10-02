@@ -219,7 +219,7 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
 
   unique_ptr<PredicateLogicalOperator> predicate_oper;
   if (!cmp_exprs.empty()) {
-    unique_ptr<ConjunctionExpr> conjunction_expr(new ConjunctionExpr(ConjunctionExpr::Type::AND, cmp_exprs));
+    unique_ptr<ConjunctionExpr> conjunction_expr(new ConjunctionExpr(ConjunctionExpr::Type::AND_EXPR, cmp_exprs));
     predicate_oper = unique_ptr<PredicateLogicalOperator>(new PredicateLogicalOperator(std::move(conjunction_expr)));
   }
 
@@ -271,7 +271,7 @@ RC LogicalPlanGenerator::create_plan(DeleteStmt *delete_stmt, unique_ptr<Logical
   return rc;
 }
 
-// TODO : 目前update语句只支持更新一个字段，后续可以扩展为多个字段的更新
+// TODO : 目前update语句支持更新多个个字段，后续可以扩展为多个表的更新
 RC LogicalPlanGenerator::create_plan(UpdateStmt *update_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
   Table                      *table       = update_stmt->table();
@@ -281,12 +281,20 @@ RC LogicalPlanGenerator::create_plan(UpdateStmt *update_stmt, unique_ptr<Logical
 
   unique_ptr<LogicalOperator> predicate_oper;
 
+  // 创建过滤条件的逻辑计划
   RC rc = create_plan(filter_stmt, predicate_oper);
   if (rc != RC::SUCCESS) {
     return rc;
   }
-
-  unique_ptr<LogicalOperator> update_oper(new UpdateLogicalOperator(table, update_stmt->field(), const_cast<Value *>(update_stmt->values()), filter_stmt));
+  // 创建更新操作的逻辑计划
+  // 使用新的构造函数，传递提前求值的 values 和需要运行时求值的 exprs
+  unique_ptr<LogicalOperator> update_oper(new UpdateLogicalOperator(
+      table,
+      update_stmt->take_fields(),
+      update_stmt->take_values(),    // 转移所有权
+      update_stmt->take_exprs(),     // 转移所有权
+      update_stmt->value_amount(),
+      filter_stmt));
 
   if (predicate_oper) {
     predicate_oper->add_child(std::move(table_get_oper));

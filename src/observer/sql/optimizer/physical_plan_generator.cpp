@@ -299,7 +299,15 @@ RC PhysicalPlanGenerator::create_plan(UpdateLogicalOperator &update_oper, unique
     }
   }
 
-  oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(update_oper.table(), update_oper.field(), update_oper.value(), update_oper.filter_stmt()));
+  // 使用新的构造函数，传递提前求值的 values 和需要运行时求值的 exprs
+  // 注意：take_values() 和 take_exprs() 会转移所有权，原 UpdateLogicalOperator 中的容器会变空
+  oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
+      update_oper.table(),
+      update_oper.take_fields(),
+      update_oper.take_values(),
+      update_oper.take_exprs(),
+      update_oper.value_mount(),
+      update_oper.filter_stmt()));
 
   if (child_physical_oper) {
     oper->add_child(std::move(child_physical_oper));

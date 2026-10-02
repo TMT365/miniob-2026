@@ -19,6 +19,8 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/memory.h"
 #include "common/value.h"
 #include "common/lang/utility.h"
+#include "common/type/index_type.h"
+
 
 class Expression;
 
@@ -124,15 +126,20 @@ struct DeleteSqlNode
   vector<ConditionSqlNode> conditions;
 };
 
+struct UpdatePairNode
+{
+  RelAttrSqlNode attr;  ///< 更新的字段
+  unique_ptr<Expression> value;    ///< 更新的值
+};
+
 /**
  * @brief 描述一个update语句
  * @ingroup SQLParser
  */
 struct UpdateSqlNode
 {
-  string                   relation_name;   ///< Relation to update
-  string                   attribute_name;  ///< 更新的字段，仅支持一个字段
-  Value                    value;           ///< 更新的值，仅支持一个字段
+  string                   relation_name;   ///< Relation to update，只支持单表更新
+  vector<unique_ptr<UpdatePairNode>> update_pairs;
   vector<ConditionSqlNode> conditions;
 };
 
@@ -192,6 +199,7 @@ struct CreateIndexSqlNode
   string index_name;      ///< Index name
   string relation_name;   ///< Relation name
   string attribute_name;  ///< Attribute name
+  IndexType index_type;
 };
 
 /**

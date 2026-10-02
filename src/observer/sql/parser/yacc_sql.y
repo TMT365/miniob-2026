@@ -11,6 +11,7 @@
 #include "sql/parser/yacc_sql.hpp"
 #include "sql/parser/lex_sql.h"
 #include "sql/expr/expression.h"
+#include "common/type/index_type.h"
 
 using namespace std;
 
@@ -105,6 +106,9 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         EXPLAIN
         STORAGE
         FORMAT
+        UNIQUE
+        NOT
+        NULL_VAL
         PRIMARY
         KEY
         ANALYZE
@@ -129,6 +133,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   AttrInfoSqlNode *                          attr_info;
   Expression *                               expression;
   vector<unique_ptr<Expression>> *           expression_list;
+  vector<unique_ptr<UpdatePairNode>> *       update_pair_list;
+  unique_ptr<UpdatePairNode> *               update_pair;
   vector<Value> *                            value_list;
   vector<ConditionSqlNode> *                 condition_list;
   vector<RelAttrSqlNode> *                   rel_attr_list;
@@ -150,6 +156,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 // %destructor { delete $$; } <rel_attr_list>
 %destructor { delete $$; } <relation_list>
 %destructor { delete $$; } <key_list>
+%destructor { delete $$; } <update_pair_list>
+%destructor { delete $$; } <update_pair>
 
 //终结符，就是不可再拆分的token
 %token <number> NUMBER
@@ -179,6 +187,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <expression>          aggregate_expression
 %type <expression_list>     expression_list
 %type <expression_list>     group_by
+%type <update_pair>         update_pair
+%type <update_pair_list>    update_pair_list
 %type <cstring>             fields_terminated_by
 %type <cstring>             enclosed_by
 %type <sql_node>            calc_stmt
@@ -208,7 +218,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 
 %left '+' '-'
 %left '*' '/'
-%right UMINUS
+%right UMINUS /** 这里定义了一个优先级，表示负号的优先级高于加减乘除 **/
 %%
 
 //所有语法解析的入口，解析结果放在sql_result中
@@ -247,34 +257,40 @@ exit_stmt:
     EXIT {
       (void)yynerrs;  // 这么写为了消除yynerrs未使用的告警。如果你有更好的方法欢迎提PR
       $$ = new ParsedSqlNode(SCF_EXIT);
+
     };
 
 help_stmt:
     HELP {
       $$ = new ParsedSqlNode(SCF_HELP);
+
     };
 
 sync_stmt:
     SYNC {
       $$ = new ParsedSqlNode(SCF_SYNC);
+
     }
     ;
 
 begin_stmt:
     TRX_BEGIN  {
       $$ = new ParsedSqlNode(SCF_BEGIN);
+
     }
     ;
 
 commit_stmt:
     TRX_COMMIT {
       $$ = new ParsedSqlNode(SCF_COMMIT);
+
     }
     ;
 
 rollback_stmt:
     TRX_ROLLBACK  {
       $$ = new ParsedSqlNode(SCF_ROLLBACK);
+
     }
     ;
 
@@ -282,18 +298,21 @@ drop_table_stmt:    /*drop table 语句的语法解析树*/
     DROP TABLE ID {
       $$ = new ParsedSqlNode(SCF_DROP_TABLE);
       $$->drop_table.relation_name = $3;
+
     };
 
 analyze_table_stmt:  /* analyze table 语法的语法解析树*/
     ANALYZE TABLE ID {
       $$ = new ParsedSqlNode(SCF_ANALYZE_TABLE);
       $$->analyze_table.relation_name = $3;
+
     }
     ;
 
 show_tables_stmt:
     SHOW TABLES {
       $$ = new ParsedSqlNode(SCF_SHOW_TABLES);
+
     }
     ;
 
@@ -301,17 +320,38 @@ desc_table_stmt:
     DESC ID  {
       $$ = new ParsedSqlNode(SCF_DESC_TABLE);
       $$->desc_table.relation_name = $2;
+
     }
     ;
 
 create_index_stmt:    /*create index 语句的语法解析树*/
-    CREATE INDEX ID ON ID LBRACE ID RBRACE
+    CREATE INDEX ID ON ID LBRACE ID RBRACE  /* 普通索引 */
     {
       $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
       CreateIndexSqlNode &create_index = $$->create_index;
+      create_index.index_type = IndexType::COMMON_INDEX;
       create_index.index_name = $3;
       create_index.relation_name = $5;
       create_index.attribute_name = $7;
+
+    }
+    | CREATE UNIQUE INDEX ID ON ID LBRACE ID RBRACE  /* 索引 */
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
+      CreateIndexSqlNode &create_index = $$->create_index;
+      create_index.index_type = IndexType::UNIQUE_INDEX;
+      create_index.index_name = $4;
+      create_index.relation_name = $6;
+      create_index.attribute_name = $8;
+    }
+    | CREATE PRIMARY KEY ID ON ID LBRACE ID RBRACE  /* 创建主键暂时页算在这里面 */
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
+      CreateIndexSqlNode &create_index = $$->create_index;
+      create_index.index_type = IndexType::PRIMARY_KEY;
+      create_index.index_name = $4;
+      create_index.relation_name = $6;
+      create_index.attribute_name = $8;
     }
     ;
 
@@ -321,6 +361,7 @@ drop_index_stmt:      /*drop index 语句的语法解析树*/
       $$ = new ParsedSqlNode(SCF_DROP_INDEX);
       $$->drop_index.index_name = $3;
       $$->drop_index.relation_name = $5;
+
     }
     ;
 create_table_stmt:    /*create table 语句的语法解析树*/
@@ -341,6 +382,7 @@ create_table_stmt:    /*create table 语句的语法解析树*/
       if ($8 != nullptr) {
         create_table.storage_format = $8;
       }
+
     }
     ;
     
@@ -348,6 +390,7 @@ attr_def_list:
     attr_def
     {
       $$ = new vector<AttrInfoSqlNode>;
+
       $$->emplace_back(*$1);
       delete $1;
     }
@@ -366,6 +409,7 @@ attr_def:
       $$->type = (AttrType)$2;
       $$->name = $1;
       $$->length = $4;
+
     }
     | ID type
     {
@@ -373,6 +417,7 @@ attr_def:
       $$->type = (AttrType)$2;
       $$->name = $1;
       $$->length = 4;
+
     }
     ;
 number:
@@ -399,6 +444,7 @@ attr_list:
     ID {
       $$ = new vector<string>();
       $$->push_back($1);
+
     }
     | ID COMMA attr_list {
       if ($3 != nullptr) {
@@ -417,6 +463,7 @@ insert_stmt:        /*insert   语句的语法解析树*/
       $$ = new ParsedSqlNode(SCF_INSERT);
       $$->insertion.relation_name = $3;
       $$->insertion.values.swap(*$6);
+
       delete $6;
     }
     ;
@@ -426,6 +473,7 @@ value_list:
     {
       $$ = new vector<Value>;
       $$->emplace_back(*$1);
+
       delete $1;
     }
     | value_list COMMA value { 
@@ -437,23 +485,28 @@ value_list:
 value:
     NUMBER {
       $$ = new Value((int)$1);
+
       @$ = @1;
     }
     | '-' NUMBER {
       $$ = new Value(-(int)$2);
+
       @$ = @2;
     }
     |FLOAT {
       $$ = new Value((float)$1);
+
       @$ = @1;
     }
     | '-' FLOAT {
       $$ = new Value(-(float)$2);
+
       @$ = @2;
     }
     |SSS {
       char *tmp = common::substr($1,1,strlen($1)-2);
       $$ = new Value(tmp);
+
       free(tmp);
     }
     ;
@@ -477,26 +530,58 @@ delete_stmt:    /*  delete 语句的语法解析树*/
         $$->deletion.conditions.swap(*$4);
         delete $4;
       }
+
     }
     ;
-update_stmt:      /*  update 语句的语法解析树*/
-    UPDATE ID SET ID EQ value where
+update_stmt:      /*  update 语句的语法解析树，现在支持多字段更新 */
+    UPDATE ID SET update_pair_list where
     {
       $$ = new ParsedSqlNode(SCF_UPDATE);
       $$->update.relation_name = $2;
-      $$->update.attribute_name = $4;
-      $$->update.value = *$6;
-      delete $6;
-      if ($7 != nullptr) {
-        $$->update.conditions.swap(*$7);
-        delete $7;
+      if ($4 != nullptr) {
+        $$->update.update_pairs.swap(*$4);  /** 定义的 update_pairs 的返回值是 vector<unique_ptr<UpdatePairNode>> *，所以这里使用swap是为了避免内存泄漏 **/
+        delete $4;
       }
+      if ($5 != nullptr) {
+        $$->update.conditions.swap(*$5);
+        delete $5;
+      }
+
+    }
+    ;
+update_pair_list:
+    update_pair {
+        $$ = new vector<unique_ptr<UpdatePairNode>>;
+
+        // $1 的类型是 unique_ptr<UpdatePairNode> *
+        // *$1 取出unique_ptr，move进vector
+        $$->emplace_back(std::move(*$1));
+        delete $1; // ！！非常关键：释放 $1 这个unique_ptr包装器本身，节点的内存由vector接管，不会释放节点
+    }
+    | update_pair COMMA update_pair_list {
+        $$ = $3;
+        $$->insert($$->begin(), std::move(*$1));
+        delete $1; // 释放临时的unique_ptr*包装
+    }
+;
+
+update_pair:
+    rel_attr EQ expression { /** 这里使用 rel_attr EQ expression 是为了支持 update t set a=1 + 2, b=2 + a 的语法 **/
+      UpdatePairNode *node = new UpdatePairNode();
+
+      node->attr.attribute_name = $1->attribute_name;
+      node->attr.relation_name = $1->relation_name;
+      node->value.reset($3);
+      $$ = new std::unique_ptr<UpdatePairNode>; /** 新建堆上的unique_ptr实例！**/
+      *$$ = std::unique_ptr<UpdatePairNode>(node);
+      delete $1;
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
     SELECT expression_list FROM rel_list where group_by
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
+
       if ($2 != nullptr) {
         $$->selection.expressions.swap(*$2);
         delete $2;
@@ -522,16 +607,18 @@ calc_stmt:
     CALC expression_list
     {
       $$ = new ParsedSqlNode(SCF_CALC);
+
       $$->calc.expressions.swap(*$2);
       delete $2;
     }
     ;
 
-expression_list:
+expression_list: /* 现在开始支持使用() */
     expression
     {
       $$ = new vector<unique_ptr<Expression>>;
       $$->emplace_back($1);
+
     }
     | expression COMMA expression_list
     {
@@ -539,11 +626,12 @@ expression_list:
         $$ = $3;
       } else {
         $$ = new vector<unique_ptr<Expression>>;
+
       }
       $$->emplace($$->begin(), $1);
     }
     ;
-expression:
+expression:  /* 括号不能算在表达式里面 */
     expression '+' expression {
       $$ = create_arithmetic_expression(ArithmeticExpr::Type::ADD, $1, $3, sql_string, &@$);
     }
@@ -556,25 +644,25 @@ expression:
     | expression '/' expression {
       $$ = create_arithmetic_expression(ArithmeticExpr::Type::DIV, $1, $3, sql_string, &@$);
     }
-    | LBRACE expression RBRACE {
-      $$ = $2;
-      $$->set_name(token_name(sql_string, &@$));
-    }
     | '-' expression %prec UMINUS {
       $$ = create_arithmetic_expression(ArithmeticExpr::Type::NEGATIVE, $2, nullptr, sql_string, &@$);
+    }
+    | LBRACE expression RBRACE {    /* 使用这一条就可以匹配所有情况的括号 */
+      $$ = $2;
+      $$->set_name(token_name(sql_string, &@$));
     }
     | '*' {
       $$ = new StarExpr();
     }
     | value {
       $$ = new ValueExpr(*$1);
-      $$->set_name(token_name(sql_string, &@$));
+
       delete $1;
     }
     | rel_attr {
       RelAttrSqlNode *node = $1;
       $$ = new UnboundFieldExpr(node->relation_name, node->attribute_name);
-      $$->set_name(token_name(sql_string, &@$));
+
       delete $1;
     }
     | aggregate_expression {
@@ -592,6 +680,7 @@ rel_attr:
     ID {
       $$ = new RelAttrSqlNode;
       $$->attribute_name = $1;
+
     }
     | ID DOT ID {
       $$ = new RelAttrSqlNode;
@@ -609,6 +698,7 @@ rel_list:
     relation {
       $$ = new vector<string>();
       $$->push_back($1);
+
     }
     | relation COMMA rel_list {
       if ($3 != nullptr) {
@@ -638,6 +728,7 @@ condition_list:
     | condition {
       $$ = new vector<ConditionSqlNode>;
       $$->emplace_back(*$1);
+
       delete $1;
     }
     | condition AND condition_list {
@@ -738,6 +829,7 @@ load_data_stmt:
         free(tmp);
       }
       free(tmp_file_name);
+
     }
     ;
 
@@ -766,6 +858,7 @@ explain_stmt:
     {
       $$ = new ParsedSqlNode(SCF_EXPLAIN);
       $$->explain.sql_node = unique_ptr<ParsedSqlNode>($2);
+
     }
     ;
 
@@ -775,6 +868,7 @@ set_variable_stmt:
       $$ = new ParsedSqlNode(SCF_SET_VARIABLE);
       $$->set_variable.name  = $2;
       $$->set_variable.value = *$4;
+
       delete $4;
     }
     ;

@@ -120,8 +120,11 @@ GROUP                                   RETURN_TOKEN(GROUP);
 BY                                      RETURN_TOKEN(BY);
 STORAGE                                 RETURN_TOKEN(STORAGE);
 FORMAT                                  RETURN_TOKEN(FORMAT);
-PRIMARY                                 RETURN_TOKEN(PRIMARY);
-KEY                                     RETURN_TOKEN(KEY);
+UNIQUE                                  RETURN_TOKEN(UNIQUE); /* 唯一索引 */
+NOT                                     RETURN_TOKEN(NOT);
+NULL                                    RETURN_TOKEN(NULL_VAL); /* 与系统自带宏冲突 */
+PRIMARY                                 RETURN_TOKEN(PRIMARY); /* 主键索引 */
+KEY                                     RETURN_TOKEN(KEY); /* PRIMARY KEY 就代表者写了 UNIQUE NOT NULL */
 ANALYZE                                 RETURN_TOKEN(ANALYZE);
 FIELDS                                  RETURN_TOKEN(FIELDS);
 TERMINATED                              RETURN_TOKEN(TERMINATED);
