@@ -18,7 +18,6 @@ See the Mulan PSL v2 for more details. */
 #include "storage/common/column.h"
 
 #include <cmath>
-#include <3rd/googletest/googlemock/include/gmock/gmock-matchers.h>
 
 int FloatType::compare(const Value &left, const Value &right) const
 {
