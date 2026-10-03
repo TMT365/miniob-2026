@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 #include "condition_filter.h"
 #include "common/log/log.h"
 #include "common/value.h"
+#include "common/type/date_type.h"
 #include "storage/record/record_manager.h"
 #include "storage/table/table.h"
 #include <math.h>
@@ -111,7 +112,32 @@ RC DefaultConditionFilter::init(Table &table, const ConditionSqlNode &condition)
   // NOTE：这里没有实现不同类型的数据比较，比如整数跟浮点数之间的对比
   // 但是选手们还是要实现。这个功能在预选赛中会出现
   if (type_left != type_right) {
-    return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    // 尝试类型转换：如果是 DATES 和 CHARS 比较，尝试把 CHARS 解析成日期
+    if ((type_left == AttrType::DATES && type_right == AttrType::CHARS) ||
+        (type_left == AttrType::CHARS && type_right == AttrType::DATES)) {
+
+      Value *char_value = (type_left == AttrType::CHARS) ? &left.value : &right.value;
+      Value *date_value = (type_left == AttrType::DATES) ? &left.value : &right.value;
+
+      // 尝试将字符串解析为日期
+      string date_str = char_value->get_string();
+      int16_t year, month, day;
+      if (!DateType::parse_date(date_str.c_str(), year, month, day)) {
+        return RC::SCHEMA_FIELD_TYPE_MISMATCH;  // 无效的日期格式
+      }
+
+      // 解析成功，更新日期值
+      date_value->set_date(year, month, day);
+
+      // 更新类型信息
+      if (type_left == AttrType::CHARS) {
+        type_left = AttrType::DATES;
+      } else {
+        type_right = AttrType::DATES;
+      }
+    } else {
+      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    }
   }
 
   return init(left, right, type_left, condition.comp);

@@ -134,9 +134,9 @@ bool DateType::parse_date(const char *c, int16_t &year, int16_t &month, int16_t 
   }
   const char *p = c;
   //首先去掉内部多余的空格，2026  - 02  - 24 ---> 2026-02-24 YYYY-MM-DD
-  char *buffer = new char[11];
+  char *buffer = new char[12];    // 多加一位 用来测试是否是 个数超过10 这种情况
   int i = 0;
-  while (i < 10 && *p != '\0') {
+  while (i < 11 && *p != '\0') {
     if ( *p == 0x20 || *p == 0x09 || *p == 0x0A || *p == 0x0D || *p == 0x0B || *p == 0x0C) {
       p++;
     }else {
@@ -144,6 +144,10 @@ bool DateType::parse_date(const char *c, int16_t &year, int16_t &month, int16_t 
     }
   }
   buffer[i] = '\0';
+  if ( i == 11) {
+    // 超过10个
+    return false;
+  }
   // 看是否是格式正确
   // 判断格式是那种 1. YYYY-MM-DD 2. YYYYMMDD , 直接格式化成 YYYY-MM-DD
   if (!format_date_str(buffer,year,month,day)) {
