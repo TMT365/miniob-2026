@@ -102,7 +102,21 @@ public:
   int      length() const { return length_; }
   AttrType attr_type() const { return attr_type_; }
 
-public:
+  union Val
+  {
+    int32_t int_value_;   ///< 4字节
+    float   float_value_; ///< 4字节
+    bool    bool_value_;  ///< 1字节
+    char   *pointer_value_; ///< 64位中是8字节
+    struct DateValue
+    {
+      int16_t year_;    ///< 2 bytes
+      int16_t month_;   ///< 2 bytes
+      int16_t day_;     ///< 2 bytes
+      int16_t padding_; ///< 对齐填充用的，没什么用，不写编译器也会自己把结构体的大小写到8字节
+    } date_value_;
+  };
+
   /**
    * 获取对应的值
    * 如果当前的类型与期望获取的类型不符，就会执行转换操作
@@ -112,25 +126,22 @@ public:
   string   get_string() const;
   string_t get_string_t() const;
   bool     get_boolean() const;
+  const Value::Val::DateValue* get_date() const;
+  string   get_date_to_string() const;
 
-public:
   void set_int(int val);
   void set_float(float val);
   void set_string(const char *s, int len = 0);
   void set_empty_string(int len);
   void set_string_from_other(const Value &other);
+  bool set_date(const string &date);
+  bool set_date(const int16_t &year, const int16_t &month, const int16_t &day);
 
 private:
   AttrType attr_type_ = AttrType::UNDEFINED;
   int      length_    = 0;
 
-  union Val
-  {
-    int32_t int_value_;
-    float   float_value_;
-    bool    bool_value_;
-    char   *pointer_value_;
-  } value_ = {.int_value_ = 0};
+  Val value_ = {.int_value_ = 0};
 
   /// 是否申请并占有内存, 目前对于 CHARS 类型 own_data_ 为true, 其余类型 own_data_ 为false
   bool own_data_ = false;

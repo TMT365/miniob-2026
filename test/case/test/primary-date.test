@@ -12,6 +12,10 @@ INSERT INTO date_table VALUES (6,'2016-2-29');
 INSERT INTO date_table VALUES (7,'1970-1-1');
 INSERT INTO date_table VALUES (8,'2000-01-01');
 INSERT INTO date_table VALUES (9,'2038-1-19');
+INSERT INTO date_table VALUES (10,'18-1-19');
+INSERT INTO date_table VALUES (11,'70-10-19');
+INSERT INTO date_table VALUES (12,'20780119');
+INSERT INTO date_table VALUES (13,'281119');
 
 -- echo 2. compare date data
 -- sort SELECT * FROM date_table WHERE u_date>'2020-1-20';

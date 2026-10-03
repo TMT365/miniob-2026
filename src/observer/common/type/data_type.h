@@ -49,7 +49,15 @@ public:
    */
   virtual int compare(const Value &left, const Value &right) const { return INT32_MAX; }
 
-  virtual int compare(const Column &left, const Column &right, int left_idx, int right_idx) const { return INT32_MAX; }
+  /**
+   *
+   * @param left 左列
+   * @param right 右列
+   * @param left_idx 左边索引
+   * @param right_idx 右边索引
+   * @return 0 left = right , 1 = left > right , -1 left < right
+   */
+virtual int compare(const Column &left, const Column &right, int left_idx, int right_idx) const { return INT32_MAX; }
 
   /**
    * @brief 计算 left + right，并将结果保存到 result 中
@@ -92,6 +100,7 @@ public:
 
   /**
    * @brief 计算从 type 到 attr_type 的隐式转换的 cost，如果无法转换，返回 INT32_MAX
+   * 隐式类型转换代价函数，计算类型转换时是要选择如何转
    */
   virtual int cast_cost(AttrType type)
   {

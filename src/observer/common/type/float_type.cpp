@@ -18,6 +18,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/common/column.h"
 
 #include <cmath>
+#include <3rd/googletest/googlemock/include/gmock/gmock-matchers.h>
 
 int FloatType::compare(const Value &left, const Value &right) const
 {
@@ -98,19 +99,24 @@ RC FloatType::to_string(const Value &val, string &result) const
 RC FloatType::cast_to(const Value &val, AttrType type, Value &result) const
 {
     switch (type) {
-        case AttrType::CHARS: {
+      case AttrType::CHARS: {
         if (!my_transform_to_char(val, result)) {
-            return RC::CANNOT_TO_SWITCH_TYPE;
+          return RC::CANNOT_TO_SWITCH_TYPE;
         }
-        } break;
-        case AttrType::INTS: {
+      } break;
+      case AttrType::INTS: {
         if (!my_transform_to_int(val, result)) {
-            return RC::CANNOT_TO_SWITCH_TYPE;
+          return RC::CANNOT_TO_SWITCH_TYPE;
         }
-        } break;
-        default: {
+      } break;
+      case AttrType::DATES : {
+        if (!my_transform_to_dataTime(val, result)) {
+          return RC::CANNOT_TO_SWITCH_TYPE;
+        }
+      } break;
+      default: {
         return RC::SCHEMA_FIELD_TYPE_MISMATCH;
-        } break;
+      } break;
     }
     return RC::SUCCESS;
 }
@@ -157,5 +163,40 @@ bool FloatType::my_transform_to_int(const Value &val, Value &result)
   }
   int int_val = static_cast<int>(f);
   result.set_int(int_val);
+  return true;
+}
+
+bool FloatType::my_transform_to_dataTime(const Value &val, Value &result) {
+  float f = val.get_float();
+  // 1. 截断小数部分，得到整数（正数直接强转，丢弃小数）
+  int64_t num = static_cast<int64_t>(f);
+
+  // 2. 校验：必须是8位(YYYYMMDD) 或者6位(YYMMDD)
+  int16_t y, m, d;
+  if (num >= 10000000 && num <= 99991231) {
+    // 8位 YYYYMMDD
+    y = static_cast<int16_t>(num / 10000);
+    m = static_cast<int16_t>((num % 10000) / 100);
+    d = static_cast<int16_t>(num % 100);
+  } else if (num >= 100000 && num <= 999999) {
+    // 6位 YYMMDD
+    int yy = static_cast<int16_t>(num / 10000);
+    m = static_cast<int16_t>((num % 10000) / 100);
+    d = static_cast<int16_t>(num % 100);
+    // MySQL两位年份规则
+    if (yy <= 69) {
+      y = yy + 2000;
+    } else {
+      y = yy + 1900;
+    }
+  } else {
+    // 不是6位/8位数字，转换失败
+    return false;
+  }
+
+  // 3. 校验日期合法性，复用你之前的 is_valid_date
+  if (!result.set_date(y, m, d)) {
+    return false;
+  }
   return true;
 }

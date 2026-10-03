@@ -40,27 +40,33 @@ int IntegerType::compare(const Column &left, const Column &right, int left_idx, 
 RC IntegerType::cast_to(const Value &val, AttrType type, Value &result) const
 {
   switch (type) {
-  case AttrType::FLOATS: {
-    bool is_ok = my_transform_to_float(val, result);
-    if (!is_ok) {
-        LOG_WARN("failed to cast int to float. val=%d", val.get_int());
-        return RC::CANNOT_TO_SWITCH_TYPE;
+    case AttrType::FLOATS: {
+      bool is_ok = my_transform_to_float(val, result);
+      if (!is_ok) {
+          LOG_WARN("failed to cast int to float. val=%d", val.get_int());
+          return RC::CANNOT_TO_SWITCH_TYPE;
+      }
+      break;
     }
-    break;
-  }
     case AttrType::CHARS: {
-        bool is_ok = my_transform_to_char(val, result);
-        if (!is_ok) {
-            LOG_WARN("failed to cast int to string. val=%d", val.get_int());
-            return RC::CANNOT_TO_SWITCH_TYPE;
-        }
-        break;
+      bool is_ok = my_transform_to_char(val, result);
+      if (!is_ok) {
+        LOG_WARN("failed to cast int to string. val=%d", val.get_int());
+        return RC::CANNOT_TO_SWITCH_TYPE;
+      }
+      break;
     }
-  default:
-    LOG_WARN("unsupported type %d", type);
-    return RC::SCHEMA_FIELD_TYPE_MISMATCH;
-  }
-
+    case AttrType::DATES : {
+      if (!my_transform_to_dataTime(val, result)) {
+        LOG_WARN("failed to cast int to datetime. val=%d", val.get_int());
+        return RC::CANNOT_TO_SWITCH_TYPE;
+      }
+      break;
+    }
+    default:
+      LOG_WARN("unsupported type %d", type);
+      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    }
   return RC::SUCCESS;
 }
 
@@ -162,5 +168,46 @@ bool IntegerType::my_transform_to_char(const Value &val, Value &result)
   }
 
   result.set_string(p);
+  return true;
+}
+
+bool IntegerType::my_transform_to_dataTime(const Value &val, Value &result) {
+  // 1. 获取整数
+  int num = val.get_int();
+  if (num < 0) {
+    return false; // 负数不可能是日期
+  }
+
+  int y, m, d;
+  if (num >= 10000000) {
+    // 8位数字 YYYYMMDD
+    if (num > 99991231) { //8 位最大不能超过 `99991231`
+      return false;
+    }
+    y = num / 10000;
+    m = (num % 10000) / 100;
+    d = num % 100;
+  } else if (num >= 100000) {
+    // 6位数字 YYMMDD
+    if (num > 991231) {
+      return false;
+    }
+    int yy = num / 10000;
+    m = (num % 10000) / 100;
+    d = num % 100;
+    // MySQL两位年份规则
+    if (yy <= 69) {
+      y = yy + 2000;
+    } else {
+      y = yy + 1900;
+    }
+  } else {
+    // 不是6位、8位数字，直接非法
+    return false;
+  }
+
+  if (!result.set_date(y, m, d)) {
+    return false;
+  }
   return true;
 }

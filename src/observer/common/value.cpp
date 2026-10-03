@@ -19,6 +19,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/sstream.h"
 #include "common/lang/string.h"
 #include "common/log/log.h"
+#include "type/date_type.h"
 
 Value::Value(int val) { set_int(val); }
 
@@ -124,6 +125,10 @@ void Value::set_data(char *data, int length)
       value_.float_value_ = *(float *)data;
       length_             = length;
     } break;
+    case AttrType::DATES: {
+      const int16_t *d = reinterpret_cast<const int16_t *>(data);
+      set_date(d[0], d[1], d[2]);
+    } break;
     case AttrType::BOOLEANS: {
       value_.bool_value_ = *(int *)data != 0;
       length_            = length;
@@ -155,6 +160,38 @@ void Value::set_boolean(bool val)
   attr_type_         = AttrType::BOOLEANS;
   value_.bool_value_ = val;
   length_            = sizeof(val);
+}
+
+// 未解析
+bool Value::set_date(const string &date)
+{
+  reset();
+  // 对于字符串类型的要先解析
+  int16_t year, month, day;
+  if (DateType::parse_date(date.c_str(), year, month, day)) {
+    attr_type_         = AttrType::DATES;
+    value_.date_value_.year_ = year;
+    value_.date_value_.month_ = month;
+    value_.date_value_.day_ = day;
+    value_.date_value_.padding_=0;
+    length_            = sizeof(Value::Val::DateValue);
+    return true;
+  }else {
+    return false;
+  }
+}
+
+// 使用过解析
+bool Value::set_date(const int16_t &year, const int16_t &month, const int16_t &day)
+{
+  reset();
+  attr_type_         = AttrType::DATES;
+  value_.date_value_.year_ = year;
+  value_.date_value_.month_ = month;
+  value_.date_value_.day_ = day;
+  value_.date_value_.padding_=0;
+  length_            = sizeof(Value::Val::DateValue);
+  return true;
 }
 
 void Value::set_string(const char *s, int len /*= 0*/)
@@ -203,6 +240,9 @@ void Value::set_value(const Value &value)
     case AttrType::CHARS: {
       set_string(value.get_string().c_str());
     } break;
+    case AttrType::DATES: {
+      set_date(value.get_date_to_string());
+    } break;
     case AttrType::BOOLEANS: {
       set_boolean(value.get_boolean());
     } break;
@@ -221,6 +261,7 @@ void Value::set_string_from_other(const Value &other)
     this->value_.pointer_value_[this->length_] = '\0';
   }
 }
+
 
 char *Value::data() const
 {
@@ -264,6 +305,11 @@ int Value::get_int() const
     case AttrType::FLOATS: {
       return (int)(value_.float_value_);
     }
+    case AttrType::DATES: {
+      // 复用 DateType::my_transform_to_int 的逻辑
+      return value_.date_value_.year_ * 1000 + value_.date_value_.month_ * 100 + value_.date_value_.day_;
+    }
+
     case AttrType::BOOLEANS: {
       return (int)(value_.bool_value_);
     }
@@ -339,6 +385,9 @@ bool Value::get_boolean() const
       float val = value_.float_value_;
       return val >= EPSILON || val <= -EPSILON;
     } break;
+    case AttrType::DATES : {
+      return true;
+    }
     case AttrType::BOOLEANS: {
       return value_.bool_value_;
     } break;
@@ -348,4 +397,35 @@ bool Value::get_boolean() const
     }
   }
   return false;
+}
+const Value::Val::DateValue *Value::get_date() const {
+  return &value_.date_value_;
+}
+
+string Value::get_date_to_string() const
+{
+  // TODO 稍后实现
+  switch (attr_type_) {
+    case AttrType::DATES: {
+      // 使用格式化输出
+      string date = date_to_string(value_.date_value_.year_, value_.date_value_.month_, value_.date_value_.day_);
+      return date;
+    } break;
+    case AttrType::CHARS: {
+      return "";
+    } break;
+    case AttrType::INTS: {
+      return "";
+    } break;
+    case AttrType::FLOATS: {
+      return "";
+    } break;
+    case AttrType::BOOLEANS: {
+      return "";
+    } break;
+    default: {
+      LOG_WARN("unknown data type. type=%d", attr_type_);
+    }
+  }
+  return "";
 }

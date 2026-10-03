@@ -36,8 +36,15 @@ public:
   {
     if (type == AttrType::INTS) {
       return 0;
-    } else if (type == AttrType::FLOATS) {
+    }
+    if (type == AttrType::FLOATS) {
       return 1;
+    }
+    if (type == AttrType::DATES) {
+      return 2;
+    }
+    if (type == AttrType::CHARS) {
+      return 10;
     }
     return INT32_MAX;
   }
@@ -49,5 +56,5 @@ public:
 private:
   bool static my_transform_to_char(const Value &val, Value &result);
   bool static my_transform_to_float(const Value &val, Value &result);
-  bool static my_transform_to_dataTime(const Value &val, Value &result) {return false;}
+  bool static my_transform_to_dataTime(const Value &val, Value &result);
 };

@@ -1,12 +1,12 @@
 #!/bin/bash
 # 生成 SQL 解析器文件：lex_sql.cpp 和 yacc_sql.cpp/yacc_sql.hpp
-
 set -e
-
 cd "$(dirname "$0")"
 
-echo "Generating parser files..."
+echo "Clean old generated parser files..."
+rm -f lex_sql.cpp yacc_sql.cpp yacc_sql.hpp
 
+echo "Generating parser files..."
 # 使用 flex 生成 lex_sql.cpp
 echo "Running flex on lex_sql.l..."
 flex -i -o lex_sql.cpp lex_sql.l

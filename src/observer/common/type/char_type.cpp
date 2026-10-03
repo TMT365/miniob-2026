@@ -11,6 +11,8 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/comparator.h"
 #include "common/log/log.h"
 #include "common/type/char_type.h"
+
+#include "date_type.h"
 #include "common/value.h"
 
 int CharType::compare(const Value &left, const Value &right) const
@@ -52,6 +54,14 @@ RC CharType::cast_to(const Value &val, AttrType type, Value &result) const
       }
       break;
     }
+    case AttrType::DATES : {
+      std::string s = val.get_string();
+      if (!my_transform_to_dataTime(s.c_str(), result)) {
+        LOG_WARN("failed to cast string to date. s=%s", s.c_str());
+        return RC::CANNOT_TO_SWITCH_TYPE;
+      }
+      break;
+    }
     default: return RC::UNIMPLEMENTED;
   }
   return RC::SUCCESS;
@@ -61,6 +71,15 @@ int CharType::cast_cost(AttrType type)
 {
   if (type == AttrType::CHARS) {
     return 0;
+  }
+  if (type == AttrType::DATES) {
+    return 1;
+  }
+  if (type == AttrType::INTS) {
+    return 2;
+  }
+  if (type == AttrType::FLOATS) {
+    return 3;
   }
   return INT32_MAX;
 }
@@ -165,4 +184,20 @@ bool CharType::my_atof(const char *str, Value &result)
 
     result.set_float(static_cast<float>(val));
     return true;
+}
+
+bool CharType::my_transform_to_dataTime(const char *str, Value &result)
+{
+  if (str == nullptr || *str == '\0') {
+    return false;
+  }
+  // 调用 DateType::parse_date
+  string formate_str;
+  int16_t year, month, day;
+  if (!DateType::parse_date(str,year,month,day)) {
+    LOG_WARN("failed to cast string to date. s=%s", str);
+    return false;
+  }
+  result.set_date(year, month, day);
+  return true;
 }

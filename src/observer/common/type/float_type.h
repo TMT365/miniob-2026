@@ -33,6 +33,23 @@ public:
 
   RC cast_to(const Value &val, AttrType type, Value &result) const override;
 
+  int cast_cost(const AttrType type) override
+  {
+    if (type == AttrType::FLOATS) {
+      return 0;
+    }
+    if (type == AttrType::INTS) {
+      return 2;
+    }
+    if (type == AttrType::DATES) {
+      return 3;
+    }
+    if (type == AttrType::CHARS) {
+      return 10;
+    }
+    return INT32_MAX;
+  }
+
   RC set_value_from_str(Value &val, const string &data) const override;
 
   RC to_string(const Value &val, string &result) const override;
@@ -40,5 +57,5 @@ public:
 private:
   bool static my_transform_to_char(const Value &val, Value &result);
   bool static my_transform_to_int(const Value &val, Value &result);
-  bool static my_transform_to_dataTime(const Value &val, Value &result) { return false;}
+  bool static my_transform_to_dataTime(const Value &val, Value &result);
 };
