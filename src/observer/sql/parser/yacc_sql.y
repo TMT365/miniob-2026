@@ -658,6 +658,7 @@ expression:  /* 括号不能算在表达式里面 */
     }
     | value {
       $$ = new ValueExpr(*$1);
+      $$->set_name(token_name(sql_string, &@$));
 
       delete $1;
     }
