@@ -101,6 +101,10 @@ WHERE                                   RETURN_TOKEN(WHERE);
 AND                                     RETURN_TOKEN(AND);
 INSERT                                  RETURN_TOKEN(INSERT);
 INTO                                    RETURN_TOKEN(INTO);
+INNER                                   RETURN_TOKEN(INNER);    /* 显示内连接 */
+JOIN                                    RETURN_TOKEN(JOIN);
+LEFT                                    RETURN_TOKEN(LEFT);
+RIGHT                                   RETURN_TOKEN(RIGHT);
 VALUES                                  RETURN_TOKEN(VALUES);
 DELETE                                  RETURN_TOKEN(DELETE);
 UPDATE                                  RETURN_TOKEN(UPDATE);
