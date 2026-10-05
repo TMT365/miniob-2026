@@ -122,6 +122,10 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         LE
         GE
         NE
+        INNER
+        JOIN
+        LEFT
+        RIGHT
 
 /** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
 %union {
@@ -132,10 +136,11 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   RelAttrSqlNode *                           rel_attr;
   vector<AttrInfoSqlNode> *                  attr_infos;
   AttrInfoSqlNode *                          attr_info;
+  JoinSqlNode*                               join;
   Expression *                               expression;
   vector<unique_ptr<Expression>> *           expression_list;
   vector<unique_ptr<UpdatePairNode>> *       update_pair_list;
-  unique_ptr<UpdatePairNode> *               update_pair;
+  unique_ptr<UpdatePairNode>*                update_pair;
   vector<Value> *                            value_list;
   vector<ConditionSqlNode> *                 condition_list;
   vector<RelAttrSqlNode> *                   rel_attr_list;
@@ -159,6 +164,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %destructor { delete $$; } <key_list>
 %destructor { delete $$; } <update_pair_list>
 %destructor { delete $$; } <update_pair>
+%destructor { delete $$; } <join>
 
 //终结符，就是不可再拆分的token
 %token <number> NUMBER
@@ -175,6 +181,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <cstring>             relation
 %type <comp>                comp_op
 %type <rel_attr>            rel_attr
+%type <join>                join
 %type <attr_infos>          attr_def_list
 %type <attr_info>           attr_def
 %type <value_list>          value_list
@@ -524,7 +531,7 @@ storage_format:
     ;
     
 delete_stmt:    /*  delete 语句的语法解析树*/
-    DELETE FROM ID where 
+    DELETE FROM ID where
     {
       $$ = new ParsedSqlNode(SCF_DELETE);
       $$->deletion.relation_name = $3;
@@ -554,9 +561,6 @@ update_stmt:      /*  update 语句的语法解析树，现在支持多字段更
 update_pair_list:
     update_pair {
         $$ = new vector<unique_ptr<UpdatePairNode>>;
-
-        // $1 的类型是 unique_ptr<UpdatePairNode> *
-        // *$1 取出unique_ptr，move进vector
         $$->emplace_back(std::move(*$1));
         delete $1; // ！！非常关键：释放 $1 这个unique_ptr包装器本身，节点的内存由vector接管，不会释放节点
     }
@@ -570,17 +574,15 @@ update_pair_list:
 update_pair:
     rel_attr EQ expression { /** 这里使用 rel_attr EQ expression 是为了支持 update t set a=1 + 2, b=2 + a 的语法 **/
       UpdatePairNode *node = new UpdatePairNode();
-
       node->attr.attribute_name = $1->attribute_name;
       node->attr.relation_name = $1->relation_name;
       node->value.reset($3);
-      $$ = new std::unique_ptr<UpdatePairNode>; /** 新建堆上的unique_ptr实例！**/
-      *$$ = std::unique_ptr<UpdatePairNode>(node);
+      $$ = new std::unique_ptr<UpdatePairNode>(node);
       delete $1;
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list where group_by
+    SELECT expression_list FROM join where group_by /* join -> JoinSqlNode* */
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
 
@@ -590,8 +592,7 @@ select_stmt:        /*  select 语句的语法解析树*/
       }
 
       if ($4 != nullptr) {
-        $$->selection.relations.swap(*$4);
-        delete $4;
+        $$->selection.join.reset($4);
       }
 
       if ($5 != nullptr) {
@@ -691,7 +692,66 @@ rel_attr:
       $$->attribute_name = $3;
     }
     ;
-
+join:  /* JoinSqlNode* */
+     ID {
+        JoinSqlNode *node = new JoinSqlNode();
+        node->left = nullptr;
+        node->right = nullptr;
+        node->type = TableRefType::BASE_TABLE;
+        node->table_name = $1;
+        node->table_alias = $1;
+        node->on_conditions.clear();
+        node->on_filter_stmt=nullptr;
+        $$ = (node);
+     }
+     | join JOIN join ON condition_list {
+        JoinSqlNode *node = new JoinSqlNode();
+        node->type = TableRefType::JOIN_NODE;
+        node->join_type = JoinType::INNER_JOIN;
+        node->on_filter_stmt=nullptr;
+        node->left.reset($1);
+        node->right.reset($3);
+        if ($5 != nullptr) {
+          node->on_conditions.swap(*$5);
+          //for (auto &cond : node->on_conditions) {
+            //cond.is_on = 1;
+          //}
+          delete $5;
+        }
+        //delete $1;
+        //delete $3;
+        $$ = node;
+     }
+     | join INNER JOIN join ON condition_list {
+        JoinSqlNode *node = new JoinSqlNode();
+        node->type = TableRefType::JOIN_NODE;
+        node->join_type = JoinType::INNER_JOIN;
+        node->on_filter_stmt=nullptr;
+        node->left.reset($1);
+        node->right.reset($4);
+        if ($6 != nullptr) {
+          node->on_conditions.swap(*$6);
+          //for (auto &cond : node->on_conditions) {
+            //cond.is_on = 1;
+          //}
+          delete $6;
+        }
+        //delete $1;
+        //delete $4;
+        $$ = node;
+     }
+     | join COMMA join {
+        JoinSqlNode *node = new JoinSqlNode();
+        node->left.reset($1);
+        node->right.reset($3);
+        node->on_filter_stmt=nullptr;
+        node->type = TableRefType::JOIN_NODE;
+        node->join_type = JoinType::COMMA_CARTESIAN;
+        // 逗号连接没有ON条件，on_conditions 为空
+        node->on_conditions.clear();
+        $$ = (node);
+     }
+     ;
 relation:
     ID {
       $$ = $1;
@@ -703,24 +763,26 @@ rel_list:
       $$->push_back($1);
 
     }
-    | relation COMMA rel_list {
+    | relation COMMA rel_list {  /* 多表查询 */
       if ($3 != nullptr) {
         $$ = $3;
       } else {
         $$ = new vector<string>;
       }
-
       $$->insert($$->begin(), $1);
     }
     ;
-
 where:
     /* empty */
     {
       $$ = nullptr;
     }
     | WHERE condition_list {
-      $$ = $2;  
+      /* 遍历里面的ConditionSqlNode为其加上 is_on = 0; */
+      //for(auto &con : *$2) {
+        //con.is_on = 0;
+      //}
+      $$ = $2;
     }
     ;
 condition_list:
