@@ -21,8 +21,8 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/utility.h"
 #include "common/type/index_type.h"
 
-
 class Expression;
+class FilterStmt;
 
 /**
  * @defgroup SQLParser SQL Parser
@@ -75,6 +75,35 @@ struct ConditionSqlNode
                                  ///< 1时，操作符右边是属性名，0时，是属性值
   RelAttrSqlNode right_attr;     ///< right-hand side attribute if right_is_attr = TRUE 右边的属性
   Value          right_value;    ///< right-hand side value if right_is_attr = FALSE
+
+  // int            is_on;          ///< TRUE if the conditionSql belongs to JOIN (FROM table_1 INNER JOIN table_2 ON
+  // ... WHERE ) 如果 JOIN 没有 ON 会自动把 WHERE作为ON
+};
+
+enum class TableRefType
+{
+  BASE_TABLE,  // 普通表 t1
+  JOIN_NODE    // join连接节点 t1 inner join t2 on ...
+};
+
+enum class JoinType
+{
+  COMMA_CARTESIAN,  // FROM t1,t2 逗号笛卡尔积
+  INNER_JOIN        // t1 INNER JOIN t2 ON ...
+};
+
+struct JoinSqlNode
+{
+  TableRefType type;  // 标记：是基础表，还是JOIN节点
+  // 当 type == JOIN_NODE 才生效
+  JoinType                 join_type;  // INNER_JOIN
+  unique_ptr<JoinSqlNode>  left;
+  unique_ptr<JoinSqlNode>  right;
+  vector<ConditionSqlNode> on_conditions;  ///< ON条件，AND连接
+  FilterStmt              *on_filter_stmt;
+  // 当 type == BASE_TABLE 才生效
+  string table_name;
+  string table_alias;
 };
 
 /**
@@ -87,11 +116,10 @@ struct ConditionSqlNode
  * where 条件 conditions，这里表示使用AND串联起来多个条件。正常的SQL语句会有OR，NOT等，
  * 甚至可以包含复杂的表达式。
  */
-
 struct SelectSqlNode
 {
   vector<unique_ptr<Expression>> expressions;  ///< 查询的表达式，就是要查询的字段，可以是聚合函数，也可以是普通的字段等等
-  vector<string>                 relations;    ///< 查询的表
+  unique_ptr<JoinSqlNode>         join;       ///< 连接类型
   vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件
   vector<unique_ptr<Expression>> group_by;     ///< group by clause
 };
