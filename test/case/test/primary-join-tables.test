@@ -19,8 +19,8 @@ INSERT INTO join_table_3 VALUES (3, 800);
 -- sort Select join_table_2.num from join_table_1 inner join join_table_2 on join_table_1.id=join_table_2.id;
 -- sort Select * from join_table_1 inner join join_table_2 on join_table_1.id=join_table_2.id inner join join_table_3 on join_table_1.id=join_table_3.id;
 -- sort Select * from join_table_1 inner join join_table_2 on join_table_1.id=join_table_2.id and join_table_2.num>13 where join_table_1.name='b';
--- sort Select * from join_table_1 inner join join_table_2 on join_table_1.id=join_table_2.id and join_table_2.num>13 where join_table_1.name='a';
--- sort Select * from join_table_1 inner join join_table_2 on join_table_1.id=join_table_2.id and join_table_2.num>23 where join_table_1.name='b';
+-- sort Select * from join_table_1 inner join join_table_2 on join_table_1.id=join_table_3.id and join_table_2.num>13 where join_table_1.name='a';
+-- sort Select * from join_table_1 inner join join_table_2 on join_table_1.id=join_table_3.id and join_table_2.num>23 where join_table_1.name='c';
 
 -- echo 3. empty
 select * from join_table_1 inner join join_table_empty_1 on join_table_1.id=join_table_empty_1.id;
