@@ -102,7 +102,12 @@ RC LogicalPlanGenerator::create_join_on_pred_oper(
   if (join->type == TableRefType::BASE_TABLE) {
     // TableGetLogicalOperator 要从表里面那记录了
     // 从JoinSqlNode 节点里面获取表名
-    Table *table = select_stmt->table_map().at(join->table_name);
+    auto iter = select_stmt->table_map().find(join->table_name);
+    if (iter == select_stmt->table_map().end()) {
+      LOG_WARN("table %s not found", join->table_name.c_str());
+      return RC::SCHEMA_TABLE_NOT_EXIST;
+    }
+    Table *table = iter->second;
     if (table) {
       // 创建 TableGetLogicalOperator
       join_on_pred_oper = make_unique<TableGetLogicalOperator>(table, ReadWriteMode::READ_ONLY);
