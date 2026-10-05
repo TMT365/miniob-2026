@@ -66,6 +66,11 @@ RC CliCommunicator::read_event(SessionEvent *&event)
     return RC::SUCCESS;
   }
 
+  // 跳过 SQL 注释（以 -- 开头的行）
+  if (command.size() >= 2 && command[0] == '-' && command[1] == '-') {
+    return RC::SUCCESS;
+  }
+
   if (MiniobLineReader::instance().is_exit_command(command)) {
     exit_ = true;
     return RC::SUCCESS;
