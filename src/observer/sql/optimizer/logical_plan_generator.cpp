@@ -94,43 +94,85 @@ RC LogicalPlanGenerator::create_plan(CalcStmt *calc_stmt, unique_ptr<LogicalOper
   return RC::SUCCESS;
 }
 
+RC LogicalPlanGenerator::create_join_on_pred_oper(
+    SelectStmt *select_stmt, JoinSqlNode *join, unique_ptr<LogicalOperator> &join_on_pred_oper)
+{
+  // 递归产生逻辑计划
+  RC rc = RC::SUCCESS;
+  if (join->type == TableRefType::BASE_TABLE) {
+    // TableGetLogicalOperator 要从表里面那记录了
+    // 从JoinSqlNode 节点里面获取表名
+    Table *table = select_stmt->table_map().at(join->table_name);
+    if (table) {
+      // 创建 TableGetLogicalOperator
+      join_on_pred_oper = make_unique<TableGetLogicalOperator>(table, ReadWriteMode::READ_ONLY);
+      return RC::SUCCESS;
+    }
+  } else if (join->type == TableRefType::JOIN_NODE) {
+    unique_ptr<LogicalOperator> left_op;
+    rc = create_join_on_pred_oper(select_stmt, join->left.get(), left_op);
+    if (OB_FAIL(rc))
+      return rc;
+
+    unique_ptr<LogicalOperator> right_op;
+    rc = create_join_on_pred_oper(select_stmt, join->right.get(), right_op);
+    if (OB_FAIL(rc))
+      return rc;
+
+    auto join_op = make_unique<JoinLogicalOperator>();
+    join_op->add_child(std::move(left_op));
+    join_op->add_child(std::move(right_op));
+    join_op->set_join_type(join->join_type);
+
+    // 直接使用已经构造好的 FilterStmt
+    // join->join_type == JoinType::INNER_JOIN &&
+    if (join->on_filter_stmt != nullptr) {
+      unique_ptr<LogicalOperator> on_pred_oper;
+      rc = create_plan(join->on_filter_stmt, on_pred_oper);
+      if (OB_FAIL(rc)) {
+        LOG_WARN("create join on predicate logical plan failed");
+        return rc;
+      }
+      join_op->set_on_predicate(std::move(on_pred_oper));
+    }
+    join_on_pred_oper = std::move(join_op);
+    return RC::SUCCESS;
+  }
+  return RC::UNIMPLEMENTED;
+}
+
 RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
   unique_ptr<LogicalOperator> *last_oper = nullptr;
+  unique_ptr<LogicalOperator>  join_on_pred_oper(nullptr);
+  last_oper = &join_on_pred_oper;
 
-  unique_ptr<LogicalOperator> table_oper(nullptr);
-  last_oper = &table_oper;
-  unique_ptr<LogicalOperator> predicate_oper;
-
-  RC rc = create_plan(select_stmt->filter_stmt(), predicate_oper);
+  // ========== 1. 构建JOIN子树：递归生成TableGet / JoinLogicalOperator（内部自带ON条件） ==========
+  // create_join_on_filter_oper：生成完整的join树，ON条件挂载在Join算子内部
+  RC rc = create_join_on_pred_oper(select_stmt, select_stmt->join_sql_node(), join_on_pred_oper);
   if (OB_FAIL(rc)) {
-    LOG_WARN("failed to create predicate logical plan. rc=%s", strrc(rc));
+    LOG_WARN("create from join sql node plan failed, rc=%s", strrc(rc));
     return rc;
   }
 
-  const vector<Table *> &tables = select_stmt->tables();
-  for (Table *table : tables) {
-
-    unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_ONLY));
-    if (table_oper == nullptr) {
-      table_oper = std::move(table_get_oper);
-    } else {
-      JoinLogicalOperator *join_oper = new JoinLogicalOperator;
-      join_oper->add_child(std::move(table_oper));
-      join_oper->add_child(std::move(table_get_oper));
-      table_oper = unique_ptr<LogicalOperator>(join_oper);
+  // ========== 2. WHERE 过滤算子（在JOIN结果之上） ==========
+  unique_ptr<LogicalOperator> where_pred_oper;
+  if (select_stmt->where_filter_stmt() != nullptr) {
+    rc = create_plan(select_stmt->where_filter_stmt(), where_pred_oper);
+    if (OB_FAIL(rc)) {
+      LOG_WARN("failed to create where predicate logical plan. rc=%s", strrc(rc));
+      return rc;
     }
   }
 
-
-  if (predicate_oper) {
+  if (where_pred_oper) {
     if (*last_oper) {
-      predicate_oper->add_child(std::move(*last_oper));
+      where_pred_oper->add_child(std::move(*last_oper));
     }
-
-    last_oper = &predicate_oper;
+    last_oper = &where_pred_oper;
   }
 
+  // ========== 3. GROUP BY 聚合 ==========
   unique_ptr<LogicalOperator> group_by_oper;
   rc = create_group_by_plan(select_stmt, group_by_oper);
   if (OB_FAIL(rc)) {
@@ -142,15 +184,14 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     if (*last_oper) {
       group_by_oper->add_child(std::move(*last_oper));
     }
-
     last_oper = &group_by_oper;
   }
 
+  // ========== 4. Project投影 ==========
   unique_ptr<LogicalOperator> project_oper = make_unique<ProjectLogicalOperator>(std::move(select_stmt->query_expressions()));
   if (*last_oper) {
     project_oper->add_child(std::move(*last_oper));
   }
-
   last_oper = &project_oper;
 
   logical_operator = std::move(*last_oper);
@@ -213,8 +254,8 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
       }
     }
 
-    ComparisonExpr *cmp_expr = new ComparisonExpr(filter_unit->comp(), std::move(left), std::move(right));
-    cmp_exprs.emplace_back(cmp_expr);
+    cmp_exprs.emplace_back(std::make_unique<ComparisonExpr>(filter_unit->comp(), std::move(left), std::move(right)
+    ));
   }
 
   unique_ptr<PredicateLogicalOperator> predicate_oper;
