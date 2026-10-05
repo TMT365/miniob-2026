@@ -199,25 +199,39 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
 
 RC PhysicalPlanGenerator::create_plan(PredicateLogicalOperator &pred_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
-  vector<unique_ptr<LogicalOperator>> &children_opers = pred_oper.children();
-  ASSERT(children_opers.size() == 1, "predicate logical operator's sub oper number should be 1");
+  /*
+   * TODO 原来的 where 过滤语句是必然有 children_.size() == 1, 现在使用 Join on 的树形结构
+   * TODO 1. 最开始的 where(PredicateLogical...)
+   *              ├───children_
+   *                      ├─── 子算子(JoinLogicalOperator, Join on)  但是 Join on的children
+   * 一定是大于1个的，PredicateLogical 下的children就不一定了
+   * TODO 也就是说当前节点 JoinSqlNode 是没有左右儿子了，存的是表，ON 存放在上一个节点的 expression中
+   *                      .....
+   *              ├───expression
+   *                      ├─── 当前这个节点的过滤表达式 expression
+   */
 
-  LogicalOperator &child_oper = *children_opers.front();
-
+  // PredicateLogicalOperator 在逻辑计划中有子节点（JOIN 结果），需要先递归创建子物理算子
+  vector<unique_ptr<LogicalOperator>> &child_opers = pred_oper.children();
+  // TODO 这里必须要递归遍历创建子算子里面的物理计划，比较children_里面只放有当前层的逻辑节点，不递归创建会导致执行报错
   unique_ptr<PhysicalOperator> child_phy_oper;
-  RC                           rc = create(child_oper, child_phy_oper, session);
-  if (rc != RC::SUCCESS) {
-    LOG_WARN("failed to create child operator of predicate operator. rc=%s", strrc(rc));
-    return rc;
+  if (!child_opers.empty()) {
+    RC rc = create(*child_opers.front(), child_phy_oper, session);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to create child operator of predicate operator. rc=%s", strrc(rc));
+      return rc;
+    }
   }
 
   vector<unique_ptr<Expression>> &expressions = pred_oper.expressions();
-  ASSERT(expressions.size() == 1, "predicate logical operator's children should be 1");
+  ASSERT(!expressions.empty(), "predicate logical operator's expression should not be empty");
 
   unique_ptr<Expression> expression = std::move(expressions.front());
   oper = unique_ptr<PhysicalOperator>(new PredicatePhysicalOperator(std::move(expression)));
-  oper->add_child(std::move(child_phy_oper));
-  return rc;
+  if (child_phy_oper) {
+    oper->add_child(std::move(child_phy_oper));
+  }
+  return RC::SUCCESS;
 }
 
 RC PhysicalPlanGenerator::create_plan(ProjectLogicalOperator &project_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
@@ -346,23 +360,45 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
     LOG_WARN("join operator should have 2 children, but have %d", child_opers.size());
     return RC::INTERNAL;
   }
+
+  // 递归创建左右子算子
+  unique_ptr<PhysicalOperator> left_physical;
+  rc = create(*child_opers[0], left_physical, session);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to create left child oper. rc=%s", strrc(rc));
+    return rc;
+  }
+
+  unique_ptr<PhysicalOperator> right_physical;
+  rc = create(*child_opers[1], right_physical, session);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to create right child oper. rc=%s", strrc(rc));
+    return rc;
+  }
+
   if (session->hash_join_on() && can_use_hash_join(join_oper)) {
-    // your code here
+    // TODO: 实现 HashJoin
   } else {
+    // 1. 创建 NestedLoopJoinPhysicalOperator
     unique_ptr<PhysicalOperator> join_physical_oper(new NestedLoopJoinPhysicalOperator());
-    for (auto &child_oper : child_opers) {
-      unique_ptr<PhysicalOperator> child_physical_oper;
-      rc = create(*child_oper, child_physical_oper, session);
+    join_physical_oper->add_child(std::move(left_physical));
+    join_physical_oper->add_child(std::move(right_physical));
+
+    // 2. 处理 ON 条件（如果有的话）
+    unique_ptr<PhysicalOperator> result = std::move(join_physical_oper);
+    if (join_oper.on_predicate() != nullptr) {
+      unique_ptr<PhysicalOperator> predicate_oper;
+      rc = create(*join_oper.on_predicate(), predicate_oper, session);
       if (rc != RC::SUCCESS) {
-        LOG_WARN("failed to create physical child oper. rc=%s", strrc(rc));
+        LOG_WARN("failed to create predicate oper for ON condition. rc=%s", strrc(rc));
         return rc;
       }
-
-      join_physical_oper->add_child(std::move(child_physical_oper));
+      predicate_oper->add_child(std::move(result));
+      result = std::move(predicate_oper);
     }
-
-    oper = std::move(join_physical_oper);
+    oper = std::move(result);
   }
+
   return rc;
 }
 
