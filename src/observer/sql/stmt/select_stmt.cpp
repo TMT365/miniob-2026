@@ -29,10 +29,68 @@ using namespace common;
  */
 SelectStmt::~SelectStmt()
 {
-  if (nullptr != filter_stmt_) {
-    delete filter_stmt_;
-    filter_stmt_ = nullptr;
+  if (nullptr != where_filter_stmt_) {
+    delete where_filter_stmt_;
+    where_filter_stmt_ = nullptr;
   }
+  if (!table_map_.empty()) {
+    table_map_.clear();
+  }
+}
+
+RC SelectStmt::semantic_analyze_join_node(
+    Db *db, JoinSqlNode *join, unordered_map<string, Table *> &table_map, vector<Table *> &tables)
+{
+  // 递归寻找
+  RC rc = RC::SUCCESS;
+  if (nullptr == join) {
+    return rc;
+  }
+
+  if (join->type == TableRefType::BASE_TABLE) {
+    const char *table_name = join->table_name.c_str();
+    if (nullptr == table_name) {
+      LOG_WARN("invalid argument. relation name is null. relation named %s", table_name);
+      return RC::INVALID_ARGUMENT;
+    }
+    Table *table = db->find_table(table_name);  /// 在数据库中查找表对象
+    if (nullptr == table) {
+      LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
+      return RC::SCHEMA_TABLE_NOT_EXIST;
+    }
+    // TODO 使用insert()是不会插入重复对象的，table_map 是无序表，插入顺序不是输出顺序
+    table_map.insert({table_name, table});
+    // 所以要使用tables保证输出有序
+    tables.push_back(table);
+  } else if (join->type == TableRefType::JOIN_NODE) {
+    rc = semantic_analyze_join_node(db, join->left.get(), table_map, tables);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("cannot construct join on filter stmt");
+      return rc;
+    }
+    rc = semantic_analyze_join_node(db, join->right.get(), table_map, tables);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("cannot construct join on filter stmt");
+      return rc;
+    }
+    // ON 只要不为空
+    if (!join->on_conditions.empty()) {
+      // 创建 JOIN ON 的statement
+      FilterStmt *on_filter_stmt = nullptr;
+      rc                         = FilterStmt::create(db,
+          nullptr,
+          &table_map,
+          join->on_conditions.data(),
+          static_cast<int>(join->on_conditions.size()),
+          on_filter_stmt);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("cannot construct join on filter stmt");
+        return rc;
+      }
+      join->on_filter_stmt = on_filter_stmt;
+    }
+  }
+  return rc;
 }
 
 RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
@@ -47,23 +105,12 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
   vector<Table *>                tables; /// 存储查询涉及的表对象
   unordered_map<string, Table *> table_map; /// 使用unordered_map存储表名和表对象的映射关系，方便后续查询和绑定字段表达式
-  // 循环遍历select_sql.relations，获取每个表名，并在数据库中查找对应的表对象
-  for (size_t i = 0; i < select_sql.relations.size(); i++) {
-    const char *table_name = select_sql.relations[i].c_str();
-    if (nullptr == table_name) {
-      LOG_WARN("invalid argument. relation name is null. index=%d", i);
-      return RC::INVALID_ARGUMENT;
-    }
 
-    Table *table = db->find_table(table_name); /// 在数据库中查找表对象
-    if (nullptr == table) {
-      LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
-      return RC::SCHEMA_TABLE_NOT_EXIST;
-    }
+  // 在递归找表的同时创建JOIN stmt
+  semantic_analyze_join_node(db, select_sql.join.get(), table_map, tables);
 
+  for (auto &table : tables) {
     binder_context.add_table(table); /// 将表对象添加到BinderContext中，方便后续绑定字段表达式
-    tables.push_back(table);
-    table_map.insert({table_name, table});
   }
 
   // collect query fields in `select` statement
@@ -93,25 +140,28 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   }
 
   // create filter statement in `where` statement
-  FilterStmt *filter_stmt = nullptr;
+  FilterStmt *where_filter_stmt = nullptr;
+  // if ()
   RC          rc          = FilterStmt::create(db,
       default_table,
       &table_map,
       select_sql.conditions.data(),
       static_cast<int>(select_sql.conditions.size()),
-      filter_stmt);
+      where_filter_stmt);
   if (rc != RC::SUCCESS) {
-    LOG_WARN("cannot construct filter stmt");
+    LOG_WARN("cannot construct where filter stmt");
     return rc;
   }
+
 
   // everything alright
   SelectStmt *select_stmt = new SelectStmt();
 
-  select_stmt->tables_.swap(tables);
   select_stmt->query_expressions_.swap(bound_expressions);
-  select_stmt->filter_stmt_ = filter_stmt;
+  select_stmt->where_filter_stmt_ = where_filter_stmt;
+  select_stmt->join_sql_node_     = select_sql.join.get();
   select_stmt->group_by_.swap(group_by_expressions);
+  select_stmt->table_map_ = table_map;
   stmt                      = select_stmt;
   return RC::SUCCESS;
 }
