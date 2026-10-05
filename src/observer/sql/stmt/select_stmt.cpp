@@ -107,7 +107,11 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   unordered_map<string, Table *> table_map; /// 使用unordered_map存储表名和表对象的映射关系，方便后续查询和绑定字段表达式
 
   // 在递归找表的同时创建JOIN stmt
-  semantic_analyze_join_node(db, select_sql.join.get(), table_map, tables);
+  RC rc = semantic_analyze_join_node(db, select_sql.join.get(), table_map, tables);
+  if (OB_FAIL(rc)) {
+    LOG_WARN("semantic analyze join node failed. rc=%s", strrc(rc));
+    return rc;
+  }
 
   for (auto &table : tables) {
     binder_context.add_table(table); /// 将表对象添加到BinderContext中，方便后续绑定字段表达式
