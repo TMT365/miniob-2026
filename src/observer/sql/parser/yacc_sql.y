@@ -472,7 +472,6 @@ insert_stmt:        /*insert   语句的语法解析树*/
       $$ = new ParsedSqlNode(SCF_INSERT);
       $$->insertion.relation_name = $3;
       $$->insertion.values.swap(*$6);
-
       delete $6;
     }
     ;
@@ -492,7 +491,7 @@ value_list:
     }
     ;
 value:
-    NUMBER {
+    | NUMBER {
       $$ = new Value((int)$1);
 
       @$ = @1;
@@ -502,21 +501,23 @@ value:
 
       @$ = @2;
     }
-    |FLOAT {
+    | FLOAT {
       $$ = new Value((float)$1);
 
       @$ = @1;
     }
     | '-' FLOAT {
       $$ = new Value(-(float)$2);
-
       @$ = @2;
     }
-    |SSS {
+    | SSS {
       char *tmp = common::substr($1,1,strlen($1)-2);
       $$ = new Value(tmp);
-
       free(tmp);
+    }
+    | NULL_VAL {
+      $$ = new Value();
+      $$->set_null();
     }
     ;
 storage_format:
@@ -634,7 +635,7 @@ expression_list: /* 现在开始支持使用() */
       $$->emplace($$->begin(), $1);
     }
     ;
-expression:  /* 括号不能算在表达式里面 */
+expression:  /* 括号能算在表达式里面 */
     expression '+' expression {
       $$ = create_arithmetic_expression(ArithmeticExpr::Type::ADD, $1, $3, sql_string, &@$);
     }
@@ -644,7 +645,7 @@ expression:  /* 括号不能算在表达式里面 */
     | expression '*' expression {
       $$ = create_arithmetic_expression(ArithmeticExpr::Type::MUL, $1, $3, sql_string, &@$);
     }
-    | expression '/' expression {
+    | expression '/' expression { /* NOTE miniob 支持 / 是整除吗？ */
       $$ = create_arithmetic_expression(ArithmeticExpr::Type::DIV, $1, $3, sql_string, &@$);
     }
     | '-' expression %prec UMINUS {
@@ -666,11 +667,12 @@ expression:  /* 括号不能算在表达式里面 */
     | rel_attr {
       RelAttrSqlNode *node = $1;
       $$ = new UnboundFieldExpr(node->relation_name, node->attribute_name);
-
+      $$->set_name(token_name(sql_string, &@$));
       delete $1;
     }
     | aggregate_expression {
       $$ = $1;
+      $$->set_name(token_name(sql_string, &@$));
     }
     ;
 
@@ -713,13 +715,8 @@ join:  /* JoinSqlNode* */
         node->right.reset($3);
         if ($5 != nullptr) {
           node->on_conditions.swap(*$5);
-          //for (auto &cond : node->on_conditions) {
-            //cond.is_on = 1;
-          //}
           delete $5;
         }
-        //delete $1;
-        //delete $3;
         $$ = node;
      }
      | join INNER JOIN join ON condition_list {
@@ -731,13 +728,8 @@ join:  /* JoinSqlNode* */
         node->right.reset($4);
         if ($6 != nullptr) {
           node->on_conditions.swap(*$6);
-          //for (auto &cond : node->on_conditions) {
-            //cond.is_on = 1;
-          //}
           delete $6;
         }
-        //delete $1;
-        //delete $4;
         $$ = node;
      }
      | join COMMA join {
@@ -778,10 +770,6 @@ where:
       $$ = nullptr;
     }
     | WHERE condition_list {
-      /* 遍历里面的ConditionSqlNode为其加上 is_on = 0; */
-      //for(auto &con : *$2) {
-        //con.is_on = 0;
-      //}
       $$ = $2;
     }
     ;
@@ -791,65 +779,57 @@ condition_list:
       $$ = nullptr;
     }
     | condition {
-      $$ = new vector<ConditionSqlNode>;
-      $$->emplace_back(*$1);
+      $$ = new vector<ConditionSqlNode>; /* NOTE 使用vector是因为有AND情况 */
+      $$->emplace_back(std::move(*$1));
 
       delete $1;
     }
     | condition AND condition_list {
       $$ = $3;
-      $$->emplace_back(*$1);
+      $$->emplace_back(std::move(*$1));
       delete $1;
     }
     ;
 condition:
-    rel_attr comp_op value
+    /* NOTE 为了能处理where里面有算数表达式的情况，这里要加入 expression_list, 同时也解决了 table.attribution comp_op 5+3-1
+     * NOTE expression_list 里面包括了value, Expression 的返回类型是基类 Expression的指针
+     * 单独这一个就可以支持所有情况了，返回值依旧是 ConditionSqlNode*
+    */
+    expression_list comp_op expression_list
     {
       $$ = new ConditionSqlNode;
-      $$->left_is_attr = 1;
-      $$->left_attr = *$1;
-      $$->right_is_attr = 0;
-      $$->right_value = *$3;
       $$->comp = $2;
-
-      delete $1;
+      // 建议增加校验
+      if ((*$1).size() != 1) {
+        // 语法错误：WHERE后面只能是单个表达式
+        yyerror(&@$, sql_string, nullptr, scanner, "condition expression must be single expression");
+        delete $1;
+        YYERROR;
+      }
+      $$->left_expr=std::move((*$1)[0]);
+      if ((*$3).size() != 1) {
+        yyerror(&@$, sql_string, nullptr, scanner, "condition expression must be single expression");
+        delete $3;
+        YYERROR;
+      }
+      $$->right_expr=std::move((*$3)[0]);
+      delete $1; // 移动当个节点的所有权不会释放vector
       delete $3;
     }
-    | value comp_op value 
+    /* 新增：支持 WHERE expression 语法，隐式当作 expression != 0 */
+    | expression_list
     {
       $$ = new ConditionSqlNode;
-      $$->left_is_attr = 0;
-      $$->left_value = *$1;
-      $$->right_is_attr = 0;
-      $$->right_value = *$3;
-      $$->comp = $2;
-
+      $$->comp = CompOp::NOT_EQUAL;
+      if ((*$1).size()==1) {
+        $$->left_expr = std::move((*$1)[0]);
+      }
+      // 创建一个值为 0 的常量表达式作为右操作数
+      ValueExpr *zero_expr = new ValueExpr();
+      Value zero_val;
+      zero_val.set_int(0);
+      $$->right_expr = unique_ptr<Expression>(zero_expr);
       delete $1;
-      delete $3;
-    }
-    | rel_attr comp_op rel_attr
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 1;
-      $$->left_attr = *$1;
-      $$->right_is_attr = 1;
-      $$->right_attr = *$3;
-      $$->comp = $2;
-
-      delete $1;
-      delete $3;
-    }
-    | value comp_op rel_attr
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 0;
-      $$->left_value = *$1;
-      $$->right_is_attr = 1;
-      $$->right_attr = *$3;
-      $$->comp = $2;
-
-      delete $1;
-      delete $3;
     }
     ;
 
