@@ -117,12 +117,14 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     binder_context.add_table(table); /// 将表对象添加到BinderContext中，方便后续绑定字段表达式
   }
 
-  // collect query fields in `select` statement
+
   vector<unique_ptr<Expression>> bound_expressions;
   ExpressionBinder expression_binder(binder_context);
-  
+  // question? 这里的expression不只是限制于字段啊？可以有字段、算数表达式、常量表达式、聚合表达式
+  // 现在连最基本的多表指定字段都无法支持：
   for (unique_ptr<Expression> &expression : select_sql.expressions) {
-     rc = expression_binder.bind_expression(expression, bound_expressions);
+    // question 这里的bind是在干嘛，UnboundFieldExpr --> FieldExpr?
+    rc = expression_binder.bind_expression(expression, bound_expressions);
     if (OB_FAIL(rc)) {
       LOG_INFO("bind expression failed. rc=%s", strrc(rc));
       return rc;
@@ -143,9 +145,11 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     default_table = tables[0];
   }
 
-  // create filter statement in `where` statement
-  FilterStmt *where_filter_stmt = nullptr;
-  // if ()
+  /*
+   * NOTE 现在的 condition 不一样了，内部是 expression，ArithmeticExpr 和 UnBoundFieldExpr
+   * NOTE 在SELECT * ...的UnBoundFieldExpt要绑定变成FieldExpr表达式，在where后面的也需要
+   */
+  FilterStmt *where_filter_stmt = new FilterStmt();
   rc = FilterStmt::create(db,
       default_table,
       &table_map,
@@ -154,6 +158,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
       where_filter_stmt);
   if (rc != RC::SUCCESS) {
     LOG_WARN("cannot construct where filter stmt");
+    delete where_filter_stmt;
     return rc;
   }
 
