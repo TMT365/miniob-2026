@@ -153,8 +153,8 @@ RC ExpressionBinder::bind_unbound_field_expression(
 
   auto unbound_field_expr = static_cast<UnboundFieldExpr *>(expr.get()); /// 将表达式转换为UnboundFieldExpr类型的指针
 
-  const char *table_name = unbound_field_expr->table_name();
-  const char *field_name = unbound_field_expr->field_name();
+  const char *table_name = unbound_field_expr->table_name().c_str();
+  const char *field_name = unbound_field_expr->field_name().c_str();
 
   Table *table = nullptr;
   if (is_blank(table_name)) {
