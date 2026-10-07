@@ -66,18 +66,11 @@ enum CompOp
  */
 struct ConditionSqlNode
 {
-  int left_is_attr;              ///< TRUE if left-hand side is an attribute
-                                 ///< 1时，操作符左边是属性名，0时，是属性值
-  Value          left_value;     ///< left-hand side value if left_is_attr = FALSE
-  RelAttrSqlNode left_attr;      ///< left-hand side attribute
+  // TODO 以后也可以直接更新为 unique_ptr<Comparison> comparison;
+  unique_ptr<Expression> left_expr;  ///< NOTE 更新了，从原来的只支持
+                                     ///< 纯单属性和纯数字常量变成支持复合表达式，由于当个ConditionSqlNode没有AND
   CompOp         comp;           ///< comparison operator
-  int            right_is_attr;  ///< TRUE if right-hand side is an attribute
-                                 ///< 1时，操作符右边是属性名，0时，是属性值
-  RelAttrSqlNode right_attr;     ///< right-hand side attribute if right_is_attr = TRUE 右边的属性
-  Value          right_value;    ///< right-hand side value if right_is_attr = FALSE
-
-  // int            is_on;          ///< TRUE if the conditionSql belongs to JOIN (FROM table_1 INNER JOIN table_2 ON
-  // ... WHERE ) 如果 JOIN 没有 ON 会自动把 WHERE作为ON
+  unique_ptr<Expression> right_expr;
 };
 
 enum class TableRefType
