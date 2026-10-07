@@ -76,6 +76,17 @@ RC IntegerType::add(const Value &left, const Value &right, Value &result) const
   return RC::SUCCESS;
 }
 
+RC IntegerType::divide(const Value &left, const Value &right, Value &result) const
+{
+  int right_int = right.get_int();
+  if (right_int == 0) {
+    result.set_null();  // 除零返回 NULL
+  } else {
+    result.set_int(left.get_int() / right_int);
+  }
+  return RC::SUCCESS;
+}
+
 RC IntegerType::subtract(const Value &left, const Value &right, Value &result) const
 {
   result.set_int(left.get_int() - right.get_int());
