@@ -77,6 +77,8 @@ public:
     return DataType::type_instance(result.attr_type())->divide(left, right, result);
   }
 
+  // static RC divide_float(const Value &left, const Value &right, Value &result) {}
+
   static RC negative(const Value &value, Value &result)
   {
     return DataType::type_instance(result.attr_type())->negative(value, result);
@@ -92,6 +94,12 @@ public:
   void set_data(const char *data, int length) { this->set_data(const_cast<char *>(data), length); }
   void set_value(const Value &value);
   void set_boolean(bool val);
+  void set_null()
+  {
+    is_null_   = true;
+    attr_type_ = AttrType::UNDEFINED;
+  }
+  bool is_null() const { return is_null_; }
 
   string to_string() const;
 
@@ -101,7 +109,6 @@ public:
 
   int      length() const { return length_; }
   AttrType attr_type() const { return attr_type_; }
-
   union Val
   {
     int32_t int_value_;   ///< 4字节
@@ -110,10 +117,32 @@ public:
     char   *pointer_value_; ///< 64位中是8字节
     struct DateValue
     {
-      int16_t year_;    ///< 2 bytes
-      int16_t month_;   ///< 2 bytes
-      int16_t day_;     ///< 2 bytes
-      int16_t padding_; ///< 对齐填充用的，没什么用，不写编译器也会自己把结构体的大小写到8字节
+      int16_t year_    = 0;  ///< 2 bytes
+      int16_t month_   = 0;  ///< 2 bytes
+      int16_t day_     = 0;  ///< 2 bytes
+      int16_t padding_ = 0;  ///< 对齐填充用的，没什么用，不写编译器也会自己把结构体的大小写到8字节
+
+      DateValue()
+      {
+        year_    = 0;
+        month_   = 0;
+        day_     = 0;
+        padding_ = 0;
+      }
+      DateValue(int x)
+      {
+        year_    = x;
+        month_   = x;
+        day_     = x;
+        padding_ = x;
+      }
+      DateValue(const int16_t year, const int16_t month, const int16_t day)
+      {
+        year_    = year;
+        month_   = month;
+        day_     = day;
+        padding_ = 0;
+      }
     } date_value_;
   };
 
@@ -140,9 +169,9 @@ public:
 private:
   AttrType attr_type_ = AttrType::UNDEFINED;
   int      length_    = 0;
+  bool     is_null_   = false;
 
   Val value_ = {.int_value_ = 0};
-
   /// 是否申请并占有内存, 目前对于 CHARS 类型 own_data_ 为true, 其余类型 own_data_ 为false
   bool own_data_ = false;
 };
