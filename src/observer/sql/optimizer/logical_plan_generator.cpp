@@ -208,59 +208,32 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
   RC                                  rc = RC::SUCCESS;
   vector<unique_ptr<Expression>> cmp_exprs;
   const vector<FilterUnit *>    &filter_units = filter_stmt->filter_units();
+  // NOTE 现在的循环只能支持AND这种扁平的where语句, 想要支持OR等需要使用树形结构，采用递归处理
   for (const FilterUnit *filter_unit : filter_units) {
     const FilterObj &filter_obj_left  = filter_unit->left();
     const FilterObj &filter_obj_right = filter_unit->right();
-
+    // NOTE 从这里把原来conditionSqlNode里面的filterUnit变成expression
+    /* 现在的 FilterObj 支持3种类型：字段，常量、复杂的表达式(Arithmetic = ValueExpr + FieldExpr)
+     *
+     */
     unique_ptr<Expression> left(filter_obj_left.is_attr
                                     ? static_cast<Expression *>(new FieldExpr(filter_obj_left.field))
-                                    : static_cast<Expression *>(new ValueExpr(filter_obj_left.value)));
+                                    : filter_obj_left.is_expr ? filter_obj_left.expr->copy().release()
+                                  : static_cast<Expression *>(new ValueExpr(filter_obj_left.value)));  // Value
 
     unique_ptr<Expression> right(filter_obj_right.is_attr
-                                     ? static_cast<Expression *>(new FieldExpr(filter_obj_right.field))
-                                     : static_cast<Expression *>(new ValueExpr(filter_obj_right.value)));
+                                    ? static_cast<Expression *>(new FieldExpr(filter_obj_right.field))
+        : filter_obj_right.is_expr ? filter_obj_right.expr->copy().release()
+                                   : static_cast<Expression *>(new ValueExpr(filter_obj_right.value)));  // Value
 
-    if (left->value_type() != right->value_type()) {
-      auto left_to_right_cost = implicit_cast_cost(left->value_type(), right->value_type());
-      auto right_to_left_cost = implicit_cast_cost(right->value_type(), left->value_type());
-      if (left_to_right_cost <= right_to_left_cost && left_to_right_cost != INT32_MAX) {
-        ExprType left_type = left->type();
-        auto cast_expr = make_unique<CastExpr>(std::move(left), right->value_type());
-        if (left_type == ExprType::VALUE) {
-          Value left_val;
-          if (OB_FAIL(rc = cast_expr->try_get_value(left_val)))
-          {
-            LOG_WARN("failed to get value from left child", strrc(rc));
-            return rc;
-          }
-          left = make_unique<ValueExpr>(left_val);
-        } else {
-          left = std::move(cast_expr);
-        }
-      } else if (right_to_left_cost < left_to_right_cost && right_to_left_cost != INT32_MAX) {
-        ExprType right_type = right->type();
-        auto cast_expr = make_unique<CastExpr>(std::move(right), left->value_type());
-        if (right_type == ExprType::VALUE) {
-          Value right_val;
-          if (OB_FAIL(rc = cast_expr->try_get_value(right_val)))
-          {
-            LOG_WARN("failed to get value from right child", strrc(rc));
-            return rc;
-          }
-          right = make_unique<ValueExpr>(right_val);
-        } else {
-          right = std::move(cast_expr);
-        }
-
-      } else {
-        rc = RC::UNSUPPORTED;
-        LOG_WARN("unsupported cast from %s to %s", attr_type_to_string(left->value_type()), attr_type_to_string(right->value_type()));
-        return rc;
-      }
+    // 2. 递归做类型对齐
+    rc = align_expression_types(left, right);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to align expression types");
+      return rc;
     }
 
-    cmp_exprs.emplace_back(std::make_unique<ComparisonExpr>(filter_unit->comp(), std::move(left), std::move(right)
-    ));
+    cmp_exprs.emplace_back(std::make_unique<ComparisonExpr>(filter_unit->comp(), std::move(left), std::move(right)));
   }
 
   unique_ptr<PredicateLogicalOperator> predicate_oper;
@@ -279,6 +252,76 @@ int LogicalPlanGenerator::implicit_cast_cost(AttrType from, AttrType to)
     return 0;
   }
   return DataType::type_instance(from)->cast_cost(to);
+}
+
+// 递归地把 left 和 right 两棵表达式树对齐类型
+// 策略：比较两棵树的根类型，选择 cast 代价小的方向，然后递归处理子节点
+RC LogicalPlanGenerator::align_expression_types(unique_ptr<Expression> &left, unique_ptr<Expression> &right)
+{
+  // 如果左是 Arithmetic，先递归对齐它的左右子节点与 right
+  if (left->type() == ExprType::ARITHMETIC) {
+    auto                  *left_arith = static_cast<ArithmeticExpr *>(left.get());
+    unique_ptr<Expression> ll(left_arith->left().release());
+    unique_ptr<Expression> lr;
+    if (left_arith->right()) {
+      lr.reset(left_arith->right().release());
+    }
+    // 先递归左子节点
+    RC rc = align_expression_types(ll, right);
+    if (rc != RC::SUCCESS)
+      return rc;
+    // 再递归右子节点
+    if (lr) {
+      rc = align_expression_types(lr, right);
+      if (rc != RC::SUCCESS)
+        return rc;
+    }
+    // 重建 Arithmetic 节点（子节点已对齐）
+    left.reset(new ArithmeticExpr(left_arith->arithmetic_type(), ll.release(), lr.release()));
+  }
+  // 【修复】else if，不会同时执行两个分支
+  else if (right->type() == ExprType::ARITHMETIC) {
+    auto                  *right_arith = static_cast<ArithmeticExpr *>(right.get());
+    unique_ptr<Expression> rl(right_arith->left().release());
+    unique_ptr<Expression> rr;
+    if (right_arith->right()) {
+      rr.reset(right_arith->right().release());
+    }
+    // 先递归左子节点
+    RC rc = align_expression_types(left, rl);
+    if (rc != RC::SUCCESS)
+      return rc;
+    // 再递归右子节点
+    if (rr) {
+      rc = align_expression_types(left, rr);
+      if (rc != RC::SUCCESS)
+        return rc;
+    }
+    // 重建 Arithmetic 节点（子节点已对齐）
+    right.reset(new ArithmeticExpr(right_arith->arithmetic_type(), rl.release(), rr.release()));
+  }
+
+  // 此时左右都不是 Arithmetic（或已经是重建后的），比较根类型
+  AttrType left_type  = left->value_type();
+  AttrType right_type = right->value_type();
+  if (left_type == right_type) {
+    return RC::SUCCESS;
+  }
+
+  // 类型不同，选择 cast 代价小的方向
+  auto left_to_right_cost = implicit_cast_cost(left_type, right_type);
+  auto right_to_left_cost = implicit_cast_cost(right_type, left_type);
+
+  if (left_to_right_cost <= right_to_left_cost && left_to_right_cost != INT32_MAX) {
+    left = make_unique<CastExpr>(std::move(left), right_type);
+  } else if (right_to_left_cost < left_to_right_cost && right_to_left_cost != INT32_MAX) {
+    right = make_unique<CastExpr>(std::move(right), left_type);
+  } else {
+    LOG_WARN("unsupported cast from %s to %s",
+        attr_type_to_string(left_type), attr_type_to_string(right_type));
+    return RC::UNSUPPORTED;
+  }
+  return RC::SUCCESS;
 }
 
 RC LogicalPlanGenerator::create_plan(InsertStmt *insert_stmt, unique_ptr<LogicalOperator> &logical_operator)
@@ -375,6 +418,7 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
   vector<unique_ptr<Expression>> &group_by_expressions = select_stmt->group_by();
   vector<Expression *> aggregate_expressions;
   vector<unique_ptr<Expression>> &query_expressions = select_stmt->query_expressions();
+  // 匿名函数递归收集聚合表达式
   function<RC(unique_ptr<Expression>&)> collector = [&](unique_ptr<Expression> &expr) -> RC {
     RC rc = RC::SUCCESS;
     if (expr->type() == ExprType::AGGREGATION) {
@@ -384,7 +428,7 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
     rc = ExpressionIterator::iterate_child_expr(*expr, collector);
     return rc;
   };
-
+  // 匿名函数递归收集分组表达式
   function<RC(unique_ptr<Expression>&)> bind_group_by_expr = [&](unique_ptr<Expression> &expr) -> RC {
     RC rc = RC::SUCCESS;
     for (size_t i = 0; i < group_by_expressions.size(); i++) {
