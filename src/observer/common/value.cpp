@@ -97,13 +97,20 @@ Value &Value::operator=(Value &&other)
 void Value::reset()
 {
   switch (attr_type_) {
-    case AttrType::CHARS:
+    case AttrType::CHARS: {
       if (own_data_ && value_.pointer_value_ != nullptr) {
         delete[] value_.pointer_value_;
         value_.pointer_value_ = nullptr;
       }
       break;
-    default: break;
+    }
+    default: {
+      value_.int_value_        = 0;
+      value_.float_value_      = 0.0;
+      value_.bool_value_       = false;
+      value_.pointer_value_    = nullptr;
+      value_.date_value_.year_ = 0;
+    } break;
   }
 
   attr_type_ = AttrType::UNDEFINED;
@@ -277,6 +284,11 @@ char *Value::data() const
 
 string Value::to_string() const
 {
+  // 如果是 NULL，返回 "NULL"
+  if (is_null_) {
+    return "NULL";
+  }
+
   string res;
   RC     rc = DataType::type_instance(this->attr_type_)->to_string(*this, res);
   if (OB_FAIL(rc)) {
