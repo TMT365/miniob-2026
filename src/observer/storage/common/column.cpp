@@ -80,6 +80,12 @@ void Column::init(const Value &value, size_t size)
   own_       = true;
   memcpy(data_, value.data(), attr_len_);
   column_type_ = Type::CONSTANT_COLUMN;
+
+  // 如果 value 是 NULL，设置为 UNDEFINED 类型
+  if (value.is_null()) {
+    attr_type_   = AttrType::UNDEFINED;
+    column_type_ = Type::CONSTANT_COLUMN;
+  }
 }
 
 void Column::reset()
@@ -154,6 +160,14 @@ Value Column::get_value(int index) const
   if (index >= count_ || index < 0) {
     return Value();
   }
+
+  // 如果是 CONSTANT_COLUMN 且类型是 UNDEFINED，说明存的是 NULL
+  if (column_type_ == Type::CONSTANT_COLUMN && attr_type_ == AttrType::UNDEFINED) {
+    Value null_val;
+    null_val.set_null();
+    return null_val;
+  }
+
   return Value(attr_type_, &data_[index * attr_len_], attr_len_);
 }
 
