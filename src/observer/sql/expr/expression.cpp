@@ -142,6 +142,11 @@ ComparisonExpr::~ComparisonExpr() {}
 RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &result) const
 {
   RC  rc         = RC::SUCCESS;
+  // NULL 与任何值比较，结果都是 UNKNOWN（视为 false）
+  if (left.is_null() || right.is_null()) {
+    result = false;
+    return RC::SUCCESS;
+  }
   int cmp_result = left.compare(right);
   result         = false;
   switch (comp_) {
@@ -320,6 +325,12 @@ RC ConjunctionExpr::get_value(const Tuple &tuple, Value &value) const
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// 全局的一元负号处理方式
+Value ArithmeticExpr::zero_ = []() {
+  Value v;
+  v.set_int(0);
+  return v;
+}();
 
 ArithmeticExpr::ArithmeticExpr(ArithmeticExpr::Type type, Expression *left, Expression *right)
     : arithmetic_type_(type), left_(left), right_(right)
@@ -434,13 +445,22 @@ RC ArithmeticExpr::execute_calc(
       if (attr_type == AttrType::INTS) {
         binary_operator<LEFT_CONSTANT, RIGHT_CONSTANT, int, DivideOperator>(
             (int *)left.data(), (int *)right.data(), (int *)result.data(), result.capacity());
+        for (int i = 0; i < result.capacity(); i++) {
+          if (DivideOperator::is_sentinel(((int *)result.data())[i])) {
+            result.set_null(i);
+          }
+        }
       } else if (attr_type == AttrType::FLOATS) {
         binary_operator<LEFT_CONSTANT, RIGHT_CONSTANT, float, DivideOperator>(
             (float *)left.data(), (float *)right.data(), (float *)result.data(), result.capacity());
-      } else {
-        rc = RC::UNIMPLEMENTED;
+        for (int i = 0; i < result.capacity(); i++) {
+          if (DivideOperator::is_sentinel(((float *)result.data())[i])) {
+            result.set_null(i);
+          }
+        }
       }
       break;
+
     case Type::NEGATIVE:
       if (attr_type == AttrType::INTS) {
         unary_operator<LEFT_CONSTANT, int, NegateOperator>((int *)left.data(), (int *)result.data(), result.capacity());
@@ -474,10 +494,7 @@ RC ArithmeticExpr::get_value(const Tuple &tuple, Value &value) const
   // 如果是 Type::NEGATIVE 是没有右表达式的
   if (arithmetic_type_ == Type::NEGATIVE || right_ == nullptr) {
     // 构造类型是 Value 值是0 的常量返回
-    // TODO 可以在改进一下
-    Value Zero;
-    Zero.set_int(0);
-    return calc_value(left_value, Zero, value);
+    return calc_value(left_value, zero_, value);
   }
   rc = right_->get_value(tuple, right_value);
   if (rc != RC::SUCCESS) {
@@ -502,10 +519,15 @@ RC ArithmeticExpr::get_column(Chunk &chunk, Column &column)
     LOG_WARN("failed to get column of left expression. rc=%s", strrc(rc));
     return rc;
   }
-  rc = right_->get_column(chunk, right_column);
-  if (rc != RC::SUCCESS) {
-    LOG_WARN("failed to get column of right expression. rc=%s", strrc(rc));
-    return rc;
+  // 处理 NEGATIVE 类型（一元负号），right_ 为 nullptr
+  if (arithmetic_type_ == Type::NEGATIVE || right_ == nullptr) {
+    right_column.init(zero_, chunk.rows());
+  } else {
+    rc = right_->get_column(chunk, right_column);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to get column of right expression. rc=%s", strrc(rc));
+      return rc;
+    }
   }
   return calc_column(left_column, right_column, column);
 }
