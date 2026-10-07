@@ -127,6 +127,16 @@ public:
   Type                    column_type() const { return column_type_; }
   static constexpr size_t DEFAULT_CAPACITY = 8192;
 
+  bool is_null_column() const { return column_type_ == Type::CONSTANT_COLUMN && attr_type_ == AttrType::UNDEFINED; }
+
+  void set_null(int index)
+  {
+    if (index < 0 || index >= count_)
+      return;
+    // 将第 index 行设为 NULL
+    // 可以用特殊值标记，比如将 data_ 中对应位置设为 0，attr_type_ 设为 UNDEFINED
+  }
+
 private:
   char *data_ = nullptr;
   /// 当前列值数量
