@@ -174,12 +174,35 @@ struct MultiplyOperator
 
 struct DivideOperator
 {
+  // template <class T>
+  // static inline T operation(T left, T right)
+  // {
+  //   // TODO: `right = 0` is invalid
+  //   return left / right;
+  // }
   template <class T>
   static inline T operation(T left, T right)
   {
-    // TODO: `right = 0` is invalid
+    if (right == 0) {
+      return std::numeric_limits<T>::max();  // sentinel 值
+    }
     return left / right;
   }
+
+  template <class T>
+  static inline bool is_sentinel(T value)
+  { return value == std::numeric_limits<T>::max(); }
+
+  // float 特化版本
+  static inline float operation(float left, float right)
+  {
+    if (right > -EPSILON && right < EPSILON) {
+      return std::numeric_limits<float>::max();
+    }
+    return left / right;
+  }
+
+  static inline bool is_sentinel(float value) { return value > (std::numeric_limits<float>::max() - 1); }
 
 #if defined(USE_SIMD)
   static inline __m256  operation(__m256 left, __m256 right) { return _mm256_div_ps(left, right); }
