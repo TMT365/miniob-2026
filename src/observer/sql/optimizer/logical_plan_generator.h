@@ -52,4 +52,5 @@ private:
       SelectStmt *select_stmt, JoinSqlNode *join, unique_ptr<LogicalOperator> &join_on_pred_oper);
 
   int implicit_cast_cost(AttrType from, AttrType to);
+  RC  align_expression_types(unique_ptr<Expression> &left, unique_ptr<Expression> &right);
 };
