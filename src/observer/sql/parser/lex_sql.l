@@ -78,7 +78,7 @@ QUOTE            [\'\"]
 {WHITE_SPACE}                                        // ignore whitespace
 \n                                                    ;
 
-{DIGIT}+                           yylval->number=atoi(yytext); RETURN_TOKEN(NUMBER);
+{DIGIT}+                           yylval->number=atoi(yytext); RETURN_TOKEN(NUMBER); // note 这里的规则不能处理带有运算符的Value  1 = (4-(5/4))*3, 这些只是纯粹的常量
 {DIGIT}+{DOT}{DIGIT}+              yylval->floats=(float)(atof(yytext)); RETURN_TOKEN(FLOAT);
 
 ";"                                     RETURN_TOKEN(SEMICOLON);
@@ -150,7 +150,8 @@ ENCLOSED                                RETURN_TOKEN(ENCLOSED);
 "+" |
 "-" |
 "*" |
-"/"                                     { return yytext[0]; }
+"/" |
+"%"                                     { return yytext[0]; }
 \"[^"]*\"                               yylval->cstring = strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(SSS);
 '[^']*\'                                yylval->cstring = strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(SSS);
 
