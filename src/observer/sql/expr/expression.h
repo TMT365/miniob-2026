@@ -179,8 +179,10 @@ public:
 
   RC get_value(const Tuple &tuple, Value &value) const override { return RC::INTERNAL; }
 
-  const char *table_name() const { return table_name_.c_str(); }
-  const char *field_name() const { return field_name_.c_str(); }
+  // const char *table_name() const { return table_name_.c_str(); }
+  // const char *field_name() const { return field_name_.c_str(); }
+  const string &field_name() const { return field_name_; }
+  const string &table_name() const { return table_name_; }
 
 private:
   string table_name_;
@@ -392,7 +394,8 @@ public:
     ADD,
     SUB,
     MUL,
-    DIV,
+    DIV,   // NOTE 整除
+    FDIV,  // Float 除
     NEGATIVE,
   };
 
@@ -439,6 +442,8 @@ private:
   Type                   arithmetic_type_;
   unique_ptr<Expression> left_;
   unique_ptr<Expression> right_;
+
+  static Value zero_;  ///< 用于 NEGATIVE 运算的零值
 };
 
 class UnboundAggregateExpr : public Expression
