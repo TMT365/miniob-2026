@@ -14,9 +14,12 @@ See the Mulan PSL v2 for more details. */
 #include <cstring>
 
 using namespace std;
+/**
+ * 这是一个内置的变长字符使用对象，并不管理真正的内存。可以分为2类，字符个数小于 INLINE_LENGTH 的和大于INLINE_LENGTH的。
+ * 大于INLINE_LENGTH使用Arena分配堆内存，小于等于的呢使用栈空间直接分配
+ */
 struct string_t
 {
-public:
   static constexpr int INLINE_LENGTH = 12;
 
   string_t() = default;
@@ -31,12 +34,14 @@ public:
   {
     value.inlined.length = len;
     if (is_inlined()) {
+      // 栈空间直接分配
       memset(value.inlined.inlined, 0, INLINE_LENGTH);
       if (size() == 0) {
         return;
       }
       memcpy(value.inlined.inlined, data, size());
     } else {
+      // 堆空间的内存指针
       value.pointer.ptr = (char *)data;
     }
   }
@@ -46,6 +51,7 @@ public:
     if (is_inlined()) {
       memset(value.inlined.inlined, 0, INLINE_LENGTH);
     } else {
+      // 销毁时直接置nullptr，不主动delete，由Arena管理
       value.pointer.ptr = nullptr;
     }
     value.inlined.length = 0;
@@ -76,6 +82,11 @@ public:
 
   bool operator!=(const string_t &r) const { return !(*this == r); }
 
+  /**
+   * 这个就是逐字节比较，和strcmp差不多
+   * @param r 右比较string_t使用对象
+   * @return bool
+   */
   bool operator>(const string_t &r) const
   {
     const uint32_t left_length  = this->size();
@@ -87,13 +98,14 @@ public:
   }
   bool operator<(const string_t &r) const { return r > *this; }
 
+  // 小字符使用这个
   struct Inlined
   {
     uint32_t length;
     char     inlined[12];
   };
   union
-  {
+  {  // 大字符使用这个，二者使用同一块内存空间
     struct
     {
       uint32_t length;

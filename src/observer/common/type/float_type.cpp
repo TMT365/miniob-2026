@@ -56,9 +56,8 @@ RC FloatType::divide(const Value &left, const Value &right, Value &result) const
 {
   if (right.get_float() > -EPSILON && right.get_float() < EPSILON) {
     result.set_null();
-  } else {
+  } else
     result.set_float(left.get_float() / right.get_float());
-  }
   return RC::SUCCESS;
 }
 

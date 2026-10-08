@@ -89,6 +89,8 @@ See the Mulan PSL v2 for more details. */
   DEFINE_RC(VALUE_TOO_LONG)              \
   DEFINE_RC(INDEX_DUPLICATE)            \
 
+
+
 enum class RC
 {
 #define DEFINE_RC(name) name,

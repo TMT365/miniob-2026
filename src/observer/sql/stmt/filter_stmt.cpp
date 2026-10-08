@@ -143,7 +143,7 @@ RC FilterStmt::create_filter_unit_recursion(
     UnboundFieldExpr *tmp_expr   = static_cast<UnboundFieldExpr *>(expr);
     string            table_name = tmp_expr->table_name();
     string            field_name = tmp_expr->field_name();
-    rc                           = get_table_and_field(db, default_table, tables,table_name,field_name,table, field);
+    rc                           = get_table_and_field(db, default_table, tables, table_name, field_name, table, field);
     if (rc != RC::SUCCESS) {
       LOG_WARN("cannot find attr");
       return rc;
@@ -155,9 +155,9 @@ RC FilterStmt::create_filter_unit_recursion(
      *  如果有无法直接求值的可以递归到下一步   5           4
      */
     auto  arith_expr = static_cast<ArithmeticExpr *>(expr);
-    Value v;
+    Value v;                            // TODO 递归尝试求值应该是出现NULL，直接returnSUCCESS
     rc = arith_expr->try_get_value(v);  // 可以直接获取 ValueExpr 的value 并进行运算得出结果
-    if (rc == RC::SUCCESS) {
+    if (rc == RC::SUCCESS) {            // OPTIMIZE 优化了原来0做除数也返回SUCCESS的bug
       filter_obj.init_value(v);  // 能归并成常量，如 3+5
     } else {
       // 归并失败（包含字段），递归处理左右子树
@@ -167,13 +167,11 @@ RC FilterStmt::create_filter_unit_recursion(
       rc = bind_expression(db, default_table, tables, arith_expr->left().get(), bound_left);
       if (rc != RC::SUCCESS)
         return rc;
-
       if (arith_expr->right()) {
         rc = bind_expression(db, default_table, tables, arith_expr->right().get(), bound_right);
         if (rc != RC::SUCCESS)
           return rc;
       }
-
       // 构建新的 ArithmeticExpr，左右子树已经是 Bound 的
       ArithmeticExpr *bound_arith =
           new ArithmeticExpr(arith_expr->arithmetic_type(), bound_left.release(), bound_right.release());
@@ -212,14 +210,12 @@ RC FilterStmt::bind_expression(Db *db, Table *default_table, unordered_map<strin
     RC                     rc = bind_expression(db, default_table, tables, arith->left().get(), left);
     if (rc != RC::SUCCESS)
       return rc;
-
     if (arith->right()) {
       rc = bind_expression(db, default_table, tables, arith->right().get(), right);
       if (rc != RC::SUCCESS)
         return rc;
     }
     bound_expr.reset(new ArithmeticExpr(arith->arithmetic_type(), left.release(), right.release()));
-
   } else if (expr->type() == ExprType::VALUE) {
     // 常量值、FieldExpr 等已经是 bound 的，直接拷贝
     // 编译器会对临时对象做优化

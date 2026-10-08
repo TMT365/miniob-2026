@@ -203,7 +203,7 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
   Value left_value;
   Value right_value;
 
-  RC rc = left_->get_value(tuple, left_value);
+  RC rc = left_->get_value(tuple, left_value);  // 遇到 ValueExpr(AttrType::NULL_VALS) 会返回SUCCESS
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
     return rc;
@@ -370,28 +370,34 @@ RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value,
 {
   RC rc = RC::SUCCESS;
 
+  // 任一操作数为 NULL,结果必为 NULL
+  if (left_value.is_null() || right_value.is_null()) {
+    value.set_null();
+    return RC::SUCCESS;
+  }
+
   const AttrType target_type = value_type();
   value.set_type(target_type);
 
   switch (arithmetic_type_) {
     case Type::ADD: {
-      Value::add(left_value, right_value, value);
+      rc = Value::add(left_value, right_value, value);
     } break;
 
     case Type::SUB: {
-      Value::subtract(left_value, right_value, value);
+      rc = Value::subtract(left_value, right_value, value);
     } break;
 
     case Type::MUL: {
-      Value::multiply(left_value, right_value, value);
+      rc = Value::multiply(left_value, right_value, value);
     } break;
 
     case Type::DIV: {
-      Value::divide(left_value, right_value, value);
+      rc = Value::divide(left_value, right_value, value);
     } break;
 
     case Type::NEGATIVE: {
-      Value::negative(left_value, value);
+      rc = Value::negative(left_value, value);
     } break;
 
     default: {

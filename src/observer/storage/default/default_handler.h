@@ -84,7 +84,6 @@ public:
    */
   RC drop_table(const char *dbname, const char *relation_name);
 
-public:
   Db    *find_db(const char *dbname) const;
   Table *find_table(const char *dbname, const char *table_name) const;
 

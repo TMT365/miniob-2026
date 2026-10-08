@@ -65,6 +65,7 @@ public:
   void init(AttrType attr_type, int attr_len, size_t size = DEFAULT_CAPACITY);
   void init(const Value &value, size_t size);
 
+  // 克隆，其实就是把这个对象的拥有权转交出去
   unique_ptr<Column> clone() const { return make_unique<Column>(*this); }
 
   virtual ~Column() { reset(); }
@@ -83,7 +84,7 @@ public:
   RC append(const char *data, int count);
 
   /**
-   * @brief 获取 index 位置的列值
+   * @brief 获取 index 位置的列值, NOTE 由于每一列的数据大小是固定的，所以可以直接使用index来获取首地址：index * attr_len_ + data_
    */
   Value get_value(int index) const;
 
@@ -94,12 +95,14 @@ public:
   }
 
   /**
-   * @brief 获取列数据的实际大小（字节）
+   * @brief 获取列数据的实际大小（字节）TODO 这里是定长的的单个数据
    */
   int data_len() const { return count_ * attr_len_; }
 
+  // 获取这个列的起始地址
   char *data() const { return data_; }
 
+  // 前面的是增加定长的数据类型比如INT, FLOAT, DATE，这里是增加一个非定常的字符
   string_t add_text(const char *str, int len);
 
   /**
@@ -116,9 +119,9 @@ public:
    */
   void reference(const Column &column);
 
-  void set_column_type(Type column_type) { column_type_ = column_type; }
-  void set_attr_type(AttrType attr_type) { attr_type_ = attr_type; }
-  void set_count(int count) { count_ = count; }
+  void set_column_type(const Type column_type) { column_type_ = column_type; }
+  void set_attr_type(const AttrType attr_type) { attr_type_ = attr_type; }
+  void set_count(const int count) { count_ = count; }
 
   int                     count() const { return count_; }
   int                     capacity() const { return capacity_; }
@@ -138,6 +141,7 @@ public:
   }
 
 private:
+  // 底层一列数据的起始地址 TODO 现在只能支持定长类型
   char *data_ = nullptr;
   /// 当前列值数量
   int count_ = 0;
@@ -151,5 +155,6 @@ private:
   int attr_len_ = -1;
   /// 列类型
   Type                     column_type_   = Type::NORMAL_COLUMN;
+  // NOTE 管理变长字符串（CHAR/VARCHAR）的堆内存，使用 Arena 内存池
   unique_ptr<VectorBuffer> vector_buffer_ = nullptr;
 };

@@ -160,14 +160,13 @@ Value Column::get_value(int index) const
   if (index >= count_ || index < 0) {
     return Value();
   }
-
-  // 如果是 CONSTANT_COLUMN 且类型是 UNDEFINED，说明存的是 NULL
-  if (column_type_ == Type::CONSTANT_COLUMN && attr_type_ == AttrType::UNDEFINED) {
+  // 如果是 CONSTANT_COLUMN 且类型是 NULL_VALS，说明存的是 NULL
+  if (column_type_ == Type::CONSTANT_COLUMN && attr_type_ == AttrType::NULL_VALS) {
     Value null_val;
     null_val.set_null();
     return null_val;
   }
-
+  // NOTE 使用date_[index * attr_len]
   return Value(attr_type_, &data_[index * attr_len_], attr_len_);
 }
 
