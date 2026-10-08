@@ -41,7 +41,10 @@ Value::Value(const Value &other)
     case AttrType::CHARS: {
       set_string_from_other(other);
     } break;
-
+      // 加上 AttrType::NULL_VALS 的判断
+    case AttrType::NULL_VALS: {
+      set_null();
+    } break;
     default: {
       this->value_ = other.value_;
     } break;
@@ -54,6 +57,8 @@ Value::Value(Value &&other)
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
   this->value_     = other.value_;
+  if (other.is_null())
+    this->is_null_ = true;
   other.own_data_  = false;
   other.length_    = 0;
 }
@@ -71,7 +76,10 @@ Value &Value::operator=(const Value &other)
     case AttrType::CHARS: {
       set_string_from_other(other);
     } break;
-
+    // 加上 AttrType::NULL_VALS 的判断
+    case AttrType::NULL_VALS: {
+      set_null();
+    } break;
     default: {
       this->value_ = other.value_;
     } break;
@@ -89,6 +97,8 @@ Value &Value::operator=(Value &&other)
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
   this->value_     = other.value_;
+  if (other.is_null())
+    this->is_null_ = true;
   other.own_data_  = false;
   other.length_    = 0;
   return *this;
@@ -116,6 +126,7 @@ void Value::reset()
   attr_type_ = AttrType::UNDEFINED;
   length_    = 0;
   own_data_  = false;
+  this->is_null_ = false;
 }
 
 void Value::set_data(char *data, int length)
@@ -135,6 +146,9 @@ void Value::set_data(char *data, int length)
     case AttrType::DATES: {
       const int16_t *d = reinterpret_cast<const int16_t *>(data);
       set_date(d[0], d[1], d[2]);
+    } break;
+    case AttrType::NULL_VALS: {
+      set_null();
     } break;
     case AttrType::BOOLEANS: {
       value_.bool_value_ = *(int *)data != 0;
@@ -250,6 +264,9 @@ void Value::set_value(const Value &value)
     case AttrType::DATES: {
       set_date(value.get_date_to_string());
     } break;
+    case AttrType::NULL_VALS: {
+      set_null();
+    }
     case AttrType::BOOLEANS: {
       set_boolean(value.get_boolean());
     } break;
