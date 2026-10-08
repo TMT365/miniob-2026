@@ -81,9 +81,8 @@ RC IntegerType::divide(const Value &left, const Value &right, Value &result) con
   int right_int = right.get_int();
   if (right_int == 0) {
     result.set_null();  // 除零返回 NULL
-  } else {
+  } else
     result.set_int(left.get_int() / right_int);
-  }
   return RC::SUCCESS;
 }
 
