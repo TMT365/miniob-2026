@@ -97,7 +97,7 @@ public:
   void set_null()
   {
     is_null_   = true;
-    attr_type_ = AttrType::UNDEFINED;
+    attr_type_ = AttrType::NULL_VALS;
   }
   bool is_null() const { return is_null_; }
 
