@@ -5,6 +5,8 @@ insert into exp_table VALUES (2, 2, -2, 5.5, 1.0);
 insert into exp_table VALUES (3, 3, 4, 5.0, 4.0);
 
 -- echo 1. select
+-- sort SELECT 1/0 FROM exp_table WHERE 1=1;
+-- sort SELECT * FROM exp_table WHERE id >= 2;
 -- sort select * from exp_table where 1 = 5/4;
 -- sort select * from exp_table where col1-2 > 0;
 -- sort select * from exp_table where 2+col2 < 1;
@@ -13,10 +15,10 @@ insert into exp_table VALUES (3, 3, 4, 5.0, 4.0);
 -- sort select * from exp_table where 5/4 = 1;
 -- sort select * from exp_table where 0 < col1-2;
 -- sort select * from exp_table where 1.0 > 2+col2;
+-- sort select * from exp_table where 1+1 = 2*1.0;
 -- sort select * from exp_table where -0 < col1-col2;
 -- sort select * from exp_table where 0 < -2+col1;
 
--- sort select * from exp_table where 1+1 = 2*1.0;
 -- sort select * from exp_table where 5/4*8 < 4+col2*col3/2;
 -- sort select * from exp_table where 5/4*8 < (4+col2)*col3/2;
 
@@ -30,4 +32,5 @@ insert into exp_table VALUES (3, 3, 4, 5.0, 4.0);
 create table exp_table2(id int, col1 int);
 insert into exp_table2 VALUES (1, 1);
 insert into exp_table2 VALUES (2, 3);
--- sort select exp_table.id,3*exp_table2.col1/(exp_table.col2+2) from exp_table,exp_table2 where 3*exp_table2.col1/(exp_table.col2+2)>1;
+-- sort SELECT exp_table.id,exp_table2.id,3*exp_table2.col1/(exp_table.col2+2) FROM exp_table,exp_table2 WHERE 3*exp_table2.col1/(exp_table.col2+2)>1;
+-- sort SELECT exp_table.id,exp_table2.id,3*exp_table2.col1/(exp_table.col2+2) FROM exp_table JOIN exp_table2 ON 3*exp_table2.id = 3*exp_table.id WHERE 3*exp_table2.col1/(exp_table.col2+2)>1;
