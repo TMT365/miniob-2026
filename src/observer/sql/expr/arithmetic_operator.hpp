@@ -10,6 +10,7 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#include <limits>
 #if defined(USE_SIMD)
 #include "common/math/simd_util.h"
 #endif

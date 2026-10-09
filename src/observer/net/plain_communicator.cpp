@@ -210,6 +210,7 @@ RC PlainCommunicator::write_result_internal(SessionEvent *event, bool &need_disc
         rc = writer_->writen(delim, strlen(delim));
         if (OB_FAIL(rc)) {
           LOG_WARN("failed to send data to client. err=%s", strerror(errno));
+          sql_result->close();
           return rc;
         }
       }
@@ -245,6 +246,7 @@ RC PlainCommunicator::write_result_internal(SessionEvent *event, bool &need_disc
   }
 
   if (OB_FAIL(rc)) {
+    sql_result->close();
     return rc;
   }
 

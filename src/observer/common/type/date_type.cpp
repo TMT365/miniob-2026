@@ -146,6 +146,7 @@ bool DateType::parse_date(const char *c, int16_t &year, int16_t &month, int16_t 
   buffer[i] = '\0';
   if ( i == 11) {
     // 超过10个
+    delete[] buffer;
     return false;
   }
   // 看是否是格式正确
@@ -217,9 +218,8 @@ bool DateType::format_date_str(char *buffer,  int16_t &year, int16_t &month, int
   }
   else if (num_idx == 0)
   {
-    // 无分隔符 YYYYMMDD，必须刚好8位数字
-    if (digit_cnt != 8)
-    {
+    // 无分隔符 YYYYMMDD 或 YYMMDD
+    if (digit_cnt != 8 && digit_cnt != 6) {
       return false;
     }
     int full = nums[0];

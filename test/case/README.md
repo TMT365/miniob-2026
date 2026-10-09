@@ -37,22 +37,22 @@
 python3 test/case/miniob_test.py
 
 # 运行指定测试（会编译）
-python3 test/case/miniob_test.py --test-case=basic
+python3 test/case/miniob_test.py --test-cases=basic
 
 # 推荐：已编译后跳过编译
-python3 test/case/miniob_test.py --test-case=basic --skip-compile
+python3 test/case/miniob_test.py --test-cases=basic --skip-compile
 
 # 多测试（逗号分隔）
-python3 test/case/miniob_test.py --test-case=basic,primary-update
+python3 test/case/miniob_test.py --test-cases=basic,primary-update
 
 # 仅生成结果，不比对
-python3 test/case/miniob_test.py --test-case=my_test --report-only
+python3 test/case/miniob_test.py --test-cases=my_test --report-only
 
 # 调试模式（保留数据）
-python3 test/case/miniob_test.py --test-case=basic -d
+python3 test/case/miniob_test.py --test-cases=basic -d
 
 # 查看 SQL 执行日志
-python3 test/case/miniob_test.py --test-case=basic --log stdout
+python3 test/case/miniob_test.py --test-cases=basic --log stdout
 
 # 指定工作目录
 python3 test/case/miniob_test.py --work-dir=/custom/path
@@ -62,7 +62,7 @@ python3 test/case/miniob_test.py --work-dir=/custom/path
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--test-case` | None | 指定运行的测试用例 |
+| `--test-case`s| None | 指定运行的测试用例 |
 | `--skip-compile` | False | 跳过编译，使用已编译的二进制 |
 | `--compile-rebuild` | False | 强制重建（先清理再编译） |
 | `--report-only` | False | 仅生成结果，不比对 |

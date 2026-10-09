@@ -149,7 +149,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
    * NOTE 现在的 condition 不一样了，内部是 expression，ArithmeticExpr 和 UnBoundFieldExpr
    * NOTE 在SELECT * ...的UnBoundFieldExpt要绑定变成FieldExpr表达式，在where后面的也需要
    */
-  FilterStmt *where_filter_stmt = new FilterStmt();
+  FilterStmt *where_filter_stmt = nullptr;
   rc = FilterStmt::create(db,
       default_table,
       &table_map,
