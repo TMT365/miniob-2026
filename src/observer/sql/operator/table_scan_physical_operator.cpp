@@ -31,7 +31,7 @@ RC TableScanPhysicalOperator::open(Trx *trx)
 RC TableScanPhysicalOperator::next()
 {
   RC rc = RC::SUCCESS;
-
+  // TODO 后续优化的时候如果where已经可以判断是非法的就直接停止，不要在获取了
   bool filter_result = false;
   // 循环从表里面获取记录，直到获取到满足条件的记录为止
   while (OB_SUCC(rc = record_scanner_->next(current_record_))) {
@@ -93,7 +93,7 @@ RC TableScanPhysicalOperator::filter(RowTuple &tuple, bool &result)
     if (rc != RC::SUCCESS) {
       return rc;
     }
-
+    // result = true 表示满足条件，result = false 表示不满足条件
     bool tmp_result = value.get_boolean();
     if (!tmp_result) {
       result = false;
