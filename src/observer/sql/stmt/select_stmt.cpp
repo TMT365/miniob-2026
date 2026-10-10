@@ -18,7 +18,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/filter_stmt.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
-#include "sql/parser/expression_binder.h"
+#include "../expr/expression_binder.h"
 
 using namespace std;
 using namespace common;
@@ -156,12 +156,18 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
       select_sql.conditions.data(),
       static_cast<int>(select_sql.conditions.size()),
       where_filter_stmt);
+
   if (rc != RC::SUCCESS) {
     LOG_WARN("cannot construct where filter stmt");
     delete where_filter_stmt;
     return rc;
   }
 
+  // create成功，指针非空，再判断是否为空条件
+  if (where_filter_stmt->filter_units().empty()) {
+    delete where_filter_stmt;
+    where_filter_stmt = nullptr;
+  }
 
   // everything alright
   SelectStmt *select_stmt = new SelectStmt();
