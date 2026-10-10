@@ -187,7 +187,9 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <value_list>          value_list
 %type <condition_list>      where
 %type <condition_list>      condition_list
-%type <cstring>             storage_format
+%type <condition_list> join_condition_list
+%type <condition_list> comma_join_condition
+%type <cstring>          storage_format
 %type <key_list>            primary_key
 %type <key_list>            attr_list
 %type <relation_list>       rel_list
@@ -677,11 +679,11 @@ expression:  /* 括号能算在表达式里面 */
     ;
 
 aggregate_expression:
+    /* NOTE 这里的 ID 是为了支持 SUM、AVG、COUNT 等聚合函数，后续可以扩展更多的聚合函数 */
     ID LBRACE expression RBRACE {
       $$ = create_aggregate_expression($1, $3, sql_string, &@$);
     }
     ;
-
 rel_attr:
     ID {
       $$ = new RelAttrSqlNode;
@@ -706,7 +708,7 @@ join:  /* JoinSqlNode* */
         node->on_filter_stmt=nullptr;
         $$ = (node);
      }
-     | join JOIN join ON condition_list {
+     | join JOIN join ON join_condition_list {
         JoinSqlNode *node = new JoinSqlNode();
         node->type = TableRefType::JOIN_NODE;
         node->join_type = JoinType::INNER_JOIN;
@@ -719,7 +721,7 @@ join:  /* JoinSqlNode* */
         }
         $$ = node;
      }
-     | join INNER JOIN join ON condition_list {
+     | join INNER JOIN join ON join_condition_list {
         JoinSqlNode *node = new JoinSqlNode();
         node->type = TableRefType::JOIN_NODE;
         node->join_type = JoinType::INNER_JOIN;
@@ -732,18 +734,49 @@ join:  /* JoinSqlNode* */
         }
         $$ = node;
      }
-     | join COMMA join {
+     | join COMMA join comma_join_condition {
         JoinSqlNode *node = new JoinSqlNode();
         node->left.reset($1);
         node->right.reset($3);
         node->on_filter_stmt=nullptr;
         node->type = TableRefType::JOIN_NODE;
-        node->join_type = JoinType::COMMA_CARTESIAN;
-        // 逗号连接没有ON条件，on_conditions 为空
-        node->on_conditions.clear();
+        if ($4 == nullptr) {
+          node->join_type = JoinType::COMMA_CARTESIAN;
+        } else {
+          // 兼容“逗号连接后带 ON”的写法：有 ON 条件时按受限内连接处理。
+          node->join_type = JoinType::INNER_JOIN;
+          node->on_conditions.swap(*$4);
+          delete $4;
+        }
         $$ = (node);
      }
      ;
+comma_join_condition:
+    /* empty */ {
+      $$ = nullptr;
+    }
+    | ON join_condition_list {
+      $$ = $2;
+    }
+    ;
+join_condition_list:
+    expression comp_op expression {
+      $$ = new vector<ConditionSqlNode>;
+      ConditionSqlNode condition;
+      condition.comp = $2;
+      condition.left_expr.reset($1);
+      condition.right_expr.reset($3);
+      $$->emplace_back(std::move(condition));
+    }
+    | expression comp_op expression AND join_condition_list {
+      $$ = $5;
+      ConditionSqlNode condition;
+      condition.comp = $2;
+      condition.left_expr.reset($1);
+      condition.right_expr.reset($3);
+      $$->insert($$->begin(), std::move(condition));
+    }
+    ;
 relation:
     ID {
       $$ = $1;
