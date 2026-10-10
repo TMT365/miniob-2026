@@ -27,9 +27,51 @@ public:
 
 protected:
   Value value_;
+  bool  initialized_ = false;
 };
 
 class SumAggregator : public Aggregator
+{
+public:
+  /**
+   * 积聚函数，顾名思义就是不断累加值
+   * @param value
+   * @return RC
+   */
+  RC accumulate(const Value &value) override;
+  /**
+   * 评估函数
+   * @param result
+   * @return
+   */
+  RC evaluate(Value &result) override;
+};
+
+class CountAggregator : public Aggregator
+{
+public:
+  RC accumulate(const Value &value) override;
+  RC evaluate(Value &result) override;
+};
+
+class AvgAggregator : public Aggregator
+{
+public:
+  RC accumulate(const Value &value) override;
+  RC evaluate(Value &result) override;
+
+private:
+  int count_ = 0;
+};
+
+class MinAggregator : public Aggregator
+{
+public:
+  RC accumulate(const Value &value) override;
+  RC evaluate(Value &result) override;
+};
+
+class MaxAggregator : public Aggregator
 {
 public:
   RC accumulate(const Value &value) override;
