@@ -159,13 +159,16 @@ RC PlainCommunicator::write_debug(SessionEvent *request, bool &need_disconnect)
 
 RC PlainCommunicator::write_result(SessionEvent *event, bool &need_disconnect)
 {
+  // 1. 核心：写SQL执行结果（表头+数据行+错误信息）
   RC rc = write_result_internal(event, need_disconnect);
+  // 2. 如果还不需要断开连接，额外发送debug信息（调试日志，就是你本地cli能看到、sock默认看不到的那类打印！）
   if (!need_disconnect) {
     RC rc1 = write_debug(event, need_disconnect);
     if (OB_FAIL(rc1)) {
       LOG_WARN("failed to send debug info to client. rc=%s, err=%s", strrc(rc), strerror(errno));
     }
   }
+  // 3. 如果仍然不需要断开连接，写入**消息分隔符**，标记这一轮SQL响应包结束
   if (!need_disconnect) {
     rc = writer_->writen(send_message_delimiter_.data(), send_message_delimiter_.size());
     if (OB_FAIL(rc)) {
@@ -260,9 +263,9 @@ RC PlainCommunicator::write_result_internal(SessionEvent *event, bool &need_disc
     }
     sql_result->set_return_code(rc);
     return write_state(event, need_disconnect);
-  } else {
-    need_disconnect = false;
   }
+
+  need_disconnect = false;
 
   RC rc_close = sql_result->close();
   if (OB_SUCC(rc)) {
@@ -319,8 +322,10 @@ RC PlainCommunicator::write_tuple_result(SqlResult *sql_result)
       return rc;
     }
   }
-
-  if (rc == RC::RECORD_EOF) {
+  /* NOTE
+   * 如果过滤条件里面不能转换类型，可能会返回CANNOT_TO_SWITCH_TYPE，这里也认为是成功的，直接返回SUCCESS。让其输出空集合
+   */
+  if (rc == RC::RECORD_EOF || rc == RC::CANNOT_TO_SWITCH_TYPE) {
     rc = RC::SUCCESS;
   }
   return rc;

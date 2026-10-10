@@ -157,6 +157,10 @@ RC HeapTableEngine::delete_record(const Record &record)
 
 RC HeapTableEngine::get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWriteMode mode)
 {
+  /* NOTE 这里获取的 scanner
+   * 是堆表的扫描器，扫描器会遍历堆表中的所有记录，并返回给调用者，这里的condition_filter为nullptr是因为我改变了原来
+   * 的where架构，把他放到了和join on 一样的predict里面
+   * */
   scanner = new HeapRecordScanner(table_, *data_buffer_pool_, trx, db_->log_handler(), mode, nullptr);
   RC rc = scanner->open_scan();
   if (rc != RC::SUCCESS) {
