@@ -316,9 +316,31 @@ RC LogicalPlanGenerator::align_expression_types(unique_ptr<Expression> &left, un
   auto right_to_left_cost = implicit_cast_cost(right_type, left_type);
 
   if (left_to_right_cost <= right_to_left_cost && left_to_right_cost != INT32_MAX) {
-    left = make_unique<CastExpr>(std::move(left), right_type);
+    auto cast_expr = make_unique<CastExpr>(std::move(left), right_type);
+    if (cast_expr->child()->type() == ExprType::VALUE) {
+      // 当字符串常量需要转换成日期时，提前检查日期是否合法。2017-2-29 转换失败后直接返回错误码，从而最终输出
+      // FAILURE，而不是继续执行到比较阶段 NOTE 如果后续要从FAILURE --> 空集合就注释这里的判断语句
+      Value cast_value;
+      RC    rc = cast_expr->try_get_value(cast_value);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to cast constant from %s to %s. rc=%s",
+            attr_type_to_string(left_type), attr_type_to_string(right_type), strrc(rc));
+        return rc;
+      }
+    }
+    left = std::move(cast_expr);
   } else if (right_to_left_cost < left_to_right_cost && right_to_left_cost != INT32_MAX) {
-    right = make_unique<CastExpr>(std::move(right), left_type);
+    auto cast_expr = make_unique<CastExpr>(std::move(right), left_type);
+    if (cast_expr->child()->type() == ExprType::VALUE) {
+      Value cast_value;
+      RC    rc = cast_expr->try_get_value(cast_value);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to cast constant from %s to %s. rc=%s",
+            attr_type_to_string(right_type), attr_type_to_string(left_type), strrc(rc));
+        return rc;
+      }
+    }
+    right = std::move(cast_expr);
   } else {
     LOG_WARN("unsupported cast from %s to %s",
         attr_type_to_string(left_type), attr_type_to_string(right_type));
