@@ -137,10 +137,10 @@ protected:
    * 当 pos_ >= 0时表示在下层算子中已经计算出该表达式的值（比如聚合表达式），且该表达式对应的结果位于
    * chunk 中 下标为 pos_ 的列中。
    */
-  int pos_ = -1;
+  int pos_ = -1;  ///< 简单理解就是 -1 表是没有找到物理表里面的列，>=0 表示找到了物理表里面的列，pos_就是列的下标
 
 private:
-  string name_;
+  string name_;  ///< 这是设置表达的name,可以理解为是表达式的别名，或者是表达式的字符串表示形式
 };
 
 class StarExpr : public Expression
@@ -468,8 +468,10 @@ public:
   AttrType value_type() const override { return child_->value_type(); }
 
 private:
-  string                 aggregate_name_;
-  unique_ptr<Expression> child_;
+  string                 aggregate_name_;  ///< 这个就是在yacc_sql.y里面的 ID
+  unique_ptr<Expression> child_;           ///< 这个里面放的是聚合表达式里面的表达式，比如COUNT(*),
+                                           ///< COUNT(field1+field2)里面的field1+field2就是child_里面的表达式
+  // 但是这是未绑定的，绑定之后就是具体的表达式了，比如COUNT(*) ,在这里是 StarExpr, 到了AggregateExpr里面就是ValueExpr.
 };
 
 class AggregateExpr : public Expression
@@ -532,6 +534,6 @@ public:
   static RC type_from_string(const char *type_str, Type &type);
 
 private:
-  Type                   aggregate_type_;
-  unique_ptr<Expression> child_;
+  Type                   aggregate_type_;  ///< 表达式的类型，可以是标准的聚合函数，也可以是自定义的function()
+  unique_ptr<Expression> child_;           ///< 这个里面放的是聚合表达式里面的表达式，对应的具体的运算表达式，
 };

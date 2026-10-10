@@ -15,7 +15,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "common/lang/string.h"
 #include "common/lang/ranges.h"
-#include "sql/parser/expression_binder.h"
+#include "expression_binder.h"
 #include "sql/expr/expression_iterator.h"
 
 using namespace common;
@@ -64,50 +64,49 @@ RC ExpressionBinder::bind_expression(unique_ptr<Expression> &expr, vector<unique
   switch (expr->type()) {
     case ExprType::STAR: {
       return bind_star_expression(expr, bound_expressions);
-    } break;
+    }
 
     case ExprType::UNBOUND_FIELD: {
       return bind_unbound_field_expression(expr, bound_expressions);
-    } break;
+    }
 
     case ExprType::UNBOUND_AGGREGATION: {
       return bind_aggregate_expression(expr, bound_expressions);
-    } break;
+    }
 
     case ExprType::FIELD: {
       return bind_field_expression(expr, bound_expressions);
-    } break;
+    }
 
     case ExprType::VALUE: {
       return bind_value_expression(expr, bound_expressions);
-    } break;
+    }
 
     case ExprType::CAST: {
       return bind_cast_expression(expr, bound_expressions);
-    } break;
+    }
 
     case ExprType::COMPARISON: {
       return bind_comparison_expression(expr, bound_expressions);
-    } break;
+    }
 
     case ExprType::CONJUNCTION: {
       return bind_conjunction_expression(expr, bound_expressions);
-    } break;
+    }
 
     case ExprType::ARITHMETIC: {
       return bind_arithmetic_expression(expr, bound_expressions);
-    } break;
+    }
 
     case ExprType::AGGREGATION: {
       ASSERT(false, "shouldn't be here");
-    } break;
+    }
 
     default: {
       LOG_WARN("unknown expression type: %d", static_cast<int>(expr->type()));
       return RC::INTERNAL;
     }
   }
-  return RC::INTERNAL;
 }
 
 RC ExpressionBinder::bind_star_expression(
@@ -398,18 +397,17 @@ RC check_aggregate_expression(AggregateExpr &expression)
     case AggregateExpr::Type::COUNT:
     case AggregateExpr::Type::MAX:
     case AggregateExpr::Type::MIN: {
-      // 任何类型都支持
+      // COUNT、MAX、MIN 支持任意类型，运行时由聚合器处理 NULL。
     } break;
   }
 
-  // 子表达式中不能再包含聚合表达式
+  // 子表达式中不能再包含聚合表达式 TODO 后续可以改进使聚合函数里面可以有聚合函数
   function<RC(unique_ptr<Expression>&)> check_aggregate_expr = [&](unique_ptr<Expression> &expr) -> RC {
-    RC rc = RC::SUCCESS;
     if (expr->type() == ExprType::AGGREGATION) {
       LOG_WARN("aggregate expression cannot be nested");
       return RC::INVALID_ARGUMENT;
     }
-    rc = ExpressionIterator::iterate_child_expr(*expr, check_aggregate_expr);
+    RC rc = ExpressionIterator::iterate_child_expr(*expr, check_aggregate_expr);
     return rc;
   };
 
@@ -441,6 +439,7 @@ RC ExpressionBinder::bind_aggregate_expression(
     ValueExpr *value_expr = new ValueExpr(Value(1));
     child_expr.reset(value_expr);
   } else {
+    /* NOTE 如果不是 COUNT(*)，那么就需要绑定子表达式，子表达式可能是字段表达式、算术表达式、常量表达式等 */
     rc = bind_expression(child_expr, child_bound_expressions);
     if (OB_FAIL(rc)) {
       return rc;
@@ -457,12 +456,14 @@ RC ExpressionBinder::bind_aggregate_expression(
   }
 
   auto aggregate_expr = make_unique<AggregateExpr>(aggregate_type, std::move(child_expr));
+  /* NOTE 这个是基类Expression的成员变量name_，用于输出的表头，在没有实现AS的情况下就是alias */
   aggregate_expr->set_name(unbound_aggregate_expr->name());
   rc = check_aggregate_expression(*aggregate_expr);
   if (OB_FAIL(rc)) {
     return rc;
   }
-
+  /* NOTE 每个子类的表达式都有放到vector<基类指针>里面 , 这是因为查询表达式是肯定是AND扁平市的，如果是where,join
+   * on则需要后期处理*/
   bound_expressions.emplace_back(std::move(aggregate_expr));
   return RC::SUCCESS;
 }
