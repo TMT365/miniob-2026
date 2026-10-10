@@ -37,13 +37,10 @@ Value::Value(const Value &other)
   this->attr_type_ = other.attr_type_;
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
+  this->is_null_   = other.is_null_;
   switch (this->attr_type_) {
     case AttrType::CHARS: {
       set_string_from_other(other);
-    } break;
-      // 加上 AttrType::NULL_VALS 的判断
-    case AttrType::NULL_VALS: {
-      set_null();
     } break;
     default: {
       this->value_ = other.value_;
@@ -57,8 +54,7 @@ Value::Value(Value &&other)
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
   this->value_     = other.value_;
-  if (other.is_null())
-    this->is_null_ = true;
+  this->is_null_   = other.is_null_;
   other.own_data_  = false;
   other.length_    = 0;
 }
@@ -72,13 +68,10 @@ Value &Value::operator=(const Value &other)
   this->attr_type_ = other.attr_type_;
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
+  this->is_null_   = other.is_null_;
   switch (this->attr_type_) {
     case AttrType::CHARS: {
       set_string_from_other(other);
-    } break;
-    // 加上 AttrType::NULL_VALS 的判断
-    case AttrType::NULL_VALS: {
-      set_null();
     } break;
     default: {
       this->value_ = other.value_;
@@ -97,9 +90,8 @@ Value &Value::operator=(Value &&other)
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
   this->value_     = other.value_;
-  if (other.is_null())
-    this->is_null_ = true;
-  other.own_data_  = false;
+  this->is_null_   = other.is_null_;
+  other.own_data_  = false;  // 这是因为临时对象是没有内存的
   other.length_    = 0;
   return *this;
 }
@@ -122,7 +114,6 @@ void Value::reset()
       value_.date_value_.year_ = 0;
     } break;
   }
-
   attr_type_ = AttrType::UNDEFINED;
   length_    = 0;
   own_data_  = false;

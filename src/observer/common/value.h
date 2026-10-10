@@ -56,7 +56,7 @@ public:
   Value &operator=(Value &&other);
 
   void reset();
-
+  // right += left;
   static RC add(const Value &left, const Value &right, Value &result)
   {
     return DataType::type_instance(result.attr_type())->add(left, right, result);
@@ -89,16 +89,6 @@ public:
     return DataType::type_instance(value.attr_type())->cast_to(value, to_type, result);
   }
 
-  void set_type(AttrType type) { this->attr_type_ = type; }
-  void set_data(char *data, int length);
-  void set_data(const char *data, int length) { this->set_data(const_cast<char *>(data), length); }
-  void set_value(const Value &value);
-  void set_boolean(bool val);
-  void set_null()
-  {
-    is_null_   = true;
-    attr_type_ = AttrType::NULL_VALS;
-  }
   bool is_null() const { return is_null_; }
 
   string to_string() const;
@@ -165,6 +155,16 @@ public:
   void set_string_from_other(const Value &other);
   bool set_date(const string &date);
   bool set_date(const int16_t &year, const int16_t &month, const int16_t &day);
+  void set_type(AttrType type) { this->attr_type_ = type; }
+  void set_data(char *data, int length);
+  void set_data(const char *data, int length) { this->set_data(const_cast<char *>(data), length); }
+  void set_value(const Value &value);
+  void set_boolean(bool val);
+  void set_null()
+  {
+    is_null_   = true;
+    attr_type_ = AttrType::NULL_VALS;
+  }
 
 private:
   AttrType attr_type_ = AttrType::UNDEFINED;
