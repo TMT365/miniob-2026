@@ -74,6 +74,10 @@ RC ExpressionBinder::bind_expression(unique_ptr<Expression> &expr, vector<unique
       return bind_aggregate_expression(expr, bound_expressions);
     }
 
+    case ExprType::UNBOUND_FUNCTION: {
+      return bind_function_expression(expr, bound_expressions);
+    }
+
     case ExprType::FIELD: {
       return bind_field_expression(expr, bound_expressions);
     }
@@ -433,13 +437,17 @@ RC ExpressionBinder::bind_aggregate_expression(
   }
 
   unique_ptr<Expression>        &child_expr = unbound_aggregate_expr->child();
+  // NOTE 为什么使用数组呢？这是统一的标准返回接口，比如SELECT *这里*可以被拆解为多个表达式。所以为了兼容。
   vector<unique_ptr<Expression>> child_bound_expressions;
 
   if (child_expr->type() == ExprType::STAR && aggregate_type == AggregateExpr::Type::COUNT) {
     ValueExpr *value_expr = new ValueExpr(Value(1));
     child_expr.reset(value_expr);
   } else {
-    /* NOTE 如果不是 COUNT(*)，那么就需要绑定子表达式，子表达式可能是字段表达式、算术表达式、常量表达式等 */
+    /* NOTE 如果不是 COUNT(*)，那么就需要绑定子表达式，子表达式可能是字段表达式、算术表达式、常量表达式等。
+     * 其它聚合表达式子表达式是树形的，只有一个根节点，所以这里要判断绑定后的子表达式数量是否为1，如果不是1，
+     * 那么就说明子表达式有问题，返回错误。
+     */
     rc = bind_expression(child_expr, child_bound_expressions);
     if (OB_FAIL(rc)) {
       return rc;
@@ -465,5 +473,72 @@ RC ExpressionBinder::bind_aggregate_expression(
   /* NOTE 每个子类的表达式都有放到vector<基类指针>里面 , 这是因为查询表达式是肯定是AND扁平市的，如果是where,join
    * on则需要后期处理*/
   bound_expressions.emplace_back(std::move(aggregate_expr));
+  return RC::SUCCESS;
+}
+
+RC ExpressionBinder::bind_function_expression(
+    unique_ptr<Expression> &expr, vector<unique_ptr<Expression>> &bound_expressions)
+{
+  auto unbound = static_cast<UnboundFunctionExpr *>(expr.get());
+  // 聚合函数目前只接受一个参数；普通函数的参数数量由具体函数决定。
+  vector<unique_ptr<Expression>> &args = unbound->args();
+
+  AggregateExpr::Type aggregate_type;
+  if (AggregateExpr::type_from_string(unbound->function_name(), aggregate_type) == RC::SUCCESS) {
+    if (args.size() != 1) {
+      LOG_WARN("aggregate function requires exactly one argument: %s", unbound->function_name());
+      return RC::INVALID_ARGUMENT;
+    }
+    unique_ptr<Expression> aggregate_expr =
+        make_unique<UnboundAggregateExpr>(unbound->function_name(), std::move(args.front()));
+    aggregate_expr->set_name(unbound->name());
+    return bind_aggregate_expression(aggregate_expr, bound_expressions);
+  }
+
+  // 如果是DATE_FORMAT(...,...)。就会有2个参数
+  vector<unique_ptr<Expression>> bound_args;
+  bound_args.reserve(args.size());
+  for (auto &arg : args) {
+    vector<unique_ptr<Expression>> one_arg;
+    RC rc = bind_expression(arg, one_arg);
+    if (OB_FAIL(rc)) {
+      return rc;
+    }
+    if (one_arg.size() != 1) {
+      return RC::INVALID_ARGUMENT;
+    }
+    bound_args.emplace_back(std::move(one_arg.front()));
+  }
+
+  FunctionExpr::Type function_type;
+  RC rc = FunctionExpr::type_from_string(unbound->function_name(), function_type);
+  if (OB_FAIL(rc)) {
+    LOG_WARN("unsupported function name: %s", unbound->function_name());
+    return rc;
+  }
+
+  const size_t expected_args = function_type == FunctionExpr::Type::DATE_FORMAT ? 2 : 1;
+  if (bound_args.size() != expected_args) {
+    LOG_WARN("invalid argument count for function: %s", unbound->function_name());
+    return RC::INVALID_ARGUMENT;
+  }
+
+  if (function_type == FunctionExpr::Type::LENGTH &&
+      bound_args[0]->value_type() != AttrType::CHARS) {
+    return RC::INVALID_ARGUMENT;
+  }
+  if (function_type == FunctionExpr::Type::ROUND &&
+      bound_args[0]->value_type() != AttrType::FLOATS) {
+    return RC::INVALID_ARGUMENT;
+  }
+  if (function_type == FunctionExpr::Type::DATE_FORMAT &&
+      (bound_args[0]->value_type() != AttrType::DATES ||
+       bound_args[1]->value_type() != AttrType::CHARS)) {
+    return RC::INVALID_ARGUMENT;
+  }
+
+  auto function = make_unique<FunctionExpr>(unbound->function_name(), bound_args);
+  function->set_name(unbound->name());
+  bound_expressions.emplace_back(std::move(function));
   return RC::SUCCESS;
 }

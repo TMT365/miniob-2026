@@ -41,13 +41,14 @@ ArithmeticExpr *create_arithmetic_expression(ArithmeticExpr::Type type,
   return expr;
 }
 
-UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
-                                           Expression *child,
-                                           const char *sql_string,
-                                           YYLTYPE *llocp)
+UnboundFunctionExpr *create_function_expression(const char *function_name,
+                                                vector<unique_ptr<Expression>> *args,
+                                                const char *sql_string,
+                                                YYLTYPE *llocp)
 {
-  UnboundAggregateExpr *expr = new UnboundAggregateExpr(aggregate_name, child);
+  UnboundFunctionExpr *expr = new UnboundFunctionExpr(function_name, *args);
   expr->set_name(token_name(sql_string, llocp));
+  delete args;
   return expr;
 }
 
@@ -194,7 +195,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <key_list>            attr_list
 %type <relation_list>       rel_list
 %type <expression>          expression
-%type <expression>          aggregate_expression
+%type <expression>          function_call
 %type <expression_list>     expression_list
 %type <expression_list>     group_by
 %type <update_pair>         update_pair
@@ -261,7 +262,7 @@ command_wrapper:
   | set_variable_stmt
   | help_stmt
   | exit_stmt
-    ;
+   ;
 
 exit_stmt:      
     EXIT {
@@ -672,16 +673,14 @@ expression:  /* 括号能算在表达式里面 */
       $$->set_name(token_name(sql_string, &@$));
       delete $1;
     }
-    | aggregate_expression {
+    | function_call {
       $$ = $1;
       $$->set_name(token_name(sql_string, &@$));
     }
     ;
-
-aggregate_expression:
-    /* NOTE 这里的 ID 是为了支持 SUM、AVG、COUNT 等聚合函数，后续可以扩展更多的聚合函数 */
-    ID LBRACE expression RBRACE {
-      $$ = create_aggregate_expression($1, $3, sql_string, &@$);
+function_call:
+    ID LBRACE expression_list RBRACE {
+      $$ = create_function_expression($1, $3, sql_string, &@$);
     }
     ;
 rel_attr:

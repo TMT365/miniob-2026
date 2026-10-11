@@ -120,10 +120,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
   vector<unique_ptr<Expression>> bound_expressions;
   ExpressionBinder expression_binder(binder_context);
-  // question? 这里的expression不只是限制于字段啊？可以有字段、算数表达式、常量表达式、聚合表达式
-  // 现在连最基本的多表指定字段都无法支持：
   for (unique_ptr<Expression> &expression : select_sql.expressions) {
-    // question 这里的bind是在干嘛，UnboundFieldExpr --> FieldExpr?
     rc = expression_binder.bind_expression(expression, bound_expressions);
     if (OB_FAIL(rc)) {
       LOG_INFO("bind expression failed. rc=%s", strrc(rc));

@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 # 修改这里即可切换默认测试文件，也可以通过环境变量覆盖。
-SQL_FILE="${SQL_FILE:-test/case/debug/expression.sql}"
+SQL_FILE="${SQL_FILE:-test/case/debug/function.sql}"
 # 单条 SQL 最多等待 1 小时；调试时可通过环境变量覆盖。
 SQL_TIMEOUT="${SQL_TIMEOUT:-3600}"
 

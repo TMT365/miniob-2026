@@ -177,7 +177,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     last_oper = &where_pred_oper;
   }
 
-  // ========== 3. GROUP BY 聚合 ==========
+  // ========== 3. GROUP BY 分组 ==========
   unique_ptr<LogicalOperator> group_by_oper;
   rc = create_group_by_plan(select_stmt, group_by_oper);
   if (OB_FAIL(rc)) {

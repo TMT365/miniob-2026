@@ -39,6 +39,7 @@ enum class ExprType
   STAR,                 ///< 星号，表示所有字段
   UNBOUND_FIELD,        ///< 未绑定的字段，需要在resolver阶段解析为FieldExpr
   UNBOUND_AGGREGATION,  ///< 未绑定的聚合函数，需要在resolver阶段解析为AggregateExpr
+  UNBOUND_FUNCTION,     ///< 未绑定的函数，需要在binder阶段区分聚合函数和标量函数
 
   FIELD,        ///< 字段。在实际执行时，根据行数据内容提取对应字段的值
   VALUE,        ///< 常量值
@@ -47,6 +48,7 @@ enum class ExprType
   CONJUNCTION,  ///< 多个表达式使用同一种关系(AND或OR)来联结
   ARITHMETIC,   ///< 算术运算
   AGGREGATION,  ///< 聚合运算
+  FUNCTION,   ///< 函数表达式
 };
 
 /**
@@ -82,17 +84,28 @@ public:
   virtual bool equal(const Expression &other) const { return false; }
   /**
    * @brief 根据具体的tuple，来计算当前表达式的值。tuple有可能是一个具体某个表的行数据
+   * 要求每个子类必须实现这个方法，因为每个表达式的计算方式都不一样。这个是在执行阶段，拿到具体的tuple后才能计算出真实的值，比如说
+   * FieldExpr就是根据tuple里面的field_id来获取对应的值，ValueExpr就是直接返回固定的值，CastExpr就是根据子表达式的值来进行类型转换，
+   * ComparisonExpr就是根据左右子表达式的值来进行比较运算，ConjunctionExpr就是根据多个子表达式的值来进行逻辑运算，
+   * ArithmeticExpr就是根据左右子表达式的值来进行算术运算，AggregateExpr就是根据子表达式的值来进行聚合运算。
+   * 每一个需要获取字段的具体值的expression都要经过这里，把获取到的值返回给上层expression
    */
   virtual RC get_value(const Tuple &tuple, Value &value) const = 0;
 
   /**
    * @brief 在没有实际运行的情况下，也就是无法获取tuple的情况下，尝试获取表达式的值
    * @details 有些表达式的值是固定的，比如ValueExpr，这种情况下可以直接获取值
+   * 比如FUNCTION里面如果是 LENGTH('abc')，那么这个表达式的值就是3，这种情况下也可以直接获取值
    */
   virtual RC try_get_value(Value &value) const { return RC::UNIMPLEMENTED; }
 
   /**
    * @brief 从 `chunk` 中获取表达式的计算结果 `column`
+   * chunk 是下层算子返回的结果集，column 是当前表达式在 chunk 中对应的列。为什么要有这个方法呢？
+   * 因为在执行阶段，chunk 是下层算子返回的结果集，当前表达式可能是下层算子计算出来的结果，比如聚合表达式，
+   * 或者是比较表达式，这些表达式的值是无法直接从 tuple 中获取的，而是需要从 chunk 中获取的。
+   * 就拿投影举例，SELECT name FROM table; 就需要在chunk中获取name列的值，而不是从tuple中获取name列的值，因为tuple中可能没有name列的值。
+   * 如果是一行行遍历tuple来计算表达式的值，那么就不需要这个方法了，但是如果是批量处理数据，那么就需要这个方法了.
    */
   virtual RC get_column(Chunk &chunk, Column &column) { return RC::UNIMPLEMENTED; }
 
@@ -105,22 +118,33 @@ public:
   /**
    * @brief 表达式值的类型
    * @details 一个表达式运算出结果后，只有一个值
+   * 这个很好理解，一个expression在经过操作后，最终会得到一个值，这个值的类型就是表达式值的类型，比如FieldExpr的值类型就是字段的类型，
+   * ValueExpr的值类型就是常量的类型，CastExpr的值类型就是转换后的类型，ComparisonExpr的值类型就是布尔类型，
+   * ConjunctionExpr的值类型就是布尔类型，ArithmeticExpr的值类型就是算术运算后的类型，AggregateExpr的值类型就是聚合运算后的类型。
+   * 上层expression需要通过这个接口获取到下层返回的值和类型
    */
   virtual AttrType value_type() const = 0;
 
   /**
    * @brief 表达式值的长度
+   * 这用来分配内存空间，在后面的column和chunk里面需要对这个字段开辟内存，不用每次通过field_meta来获取长度，直接通过表达式获取长度就可以了
    */
   virtual int value_length() const { return -1; }
 
   /**
    * @brief 表达式的名字，比如是字段名称，或者用户在执行SQL语句时输入的内容
+   * 一般来说，这个是用于投影时的输出
    */
   virtual const char *name() const { return name_.c_str(); }
   virtual void        set_name(string name) { name_ = name; }
 
   /**
    * @brief 表达式在下层算子返回的 chunk 中的位置
+   * 这个不是所有子类都需要，FieldExpr里面的field_id就是在chunk里面的下标，
+   * ValueExpr里面的pos_就是在chunk里面的下标，
+   * CastExpr里面的pos_就是在chunk里面的下标，ComparisonExpr里面的pos_就是在chunk里面的下标，
+   * ConjunctionExpr里面的pos_就是在chunk里面的下标，ArithmeticExpr里面的pos_就是在chunk里面的下标，
+   * AggregateExpr里面的pos_就是在chunk里面的下标。
    */
   virtual int  pos() const { return pos_; }
   virtual void set_pos(int pos) { pos_ = pos; }
@@ -474,6 +498,37 @@ private:
   // 但是这是未绑定的，绑定之后就是具体的表达式了，比如COUNT(*) ,在这里是 StarExpr, 到了AggregateExpr里面就是ValueExpr.
 };
 
+/**
+ * UboundFunctionExpr 里面只实现必要函数功能，不做其它扩展
+ */
+class UnboundFunctionExpr : public Expression
+{
+public:
+  UnboundFunctionExpr(const char *function_name, vector<unique_ptr<Expression>> &args)
+      : function_name_(function_name), args_(std::move(args))
+  {}
+
+  ExprType type() const override { return ExprType::UNBOUND_FUNCTION; }
+  AttrType value_type() const override { return AttrType::UNDEFINED; }
+  RC get_value(const Tuple &, Value &) const override { return RC::INTERNAL; }
+
+  unique_ptr<Expression> copy() const override
+  {
+    vector<unique_ptr<Expression>> args;
+    for (const auto &arg : args_) {
+      args.emplace_back(arg->copy());
+    }
+    return make_unique<UnboundFunctionExpr>(function_name_.c_str(), args);
+  }
+
+  const char *function_name() const { return function_name_.c_str(); }
+  vector<unique_ptr<Expression>> &args() { return args_; }
+
+private:
+  string function_name_;
+  vector<unique_ptr<Expression>> args_;
+};
+
 class AggregateExpr : public Expression
 {
 public:
@@ -536,4 +591,50 @@ public:
 private:
   Type                   aggregate_type_;  ///< 表达式的类型，可以是标准的聚合函数，也可以是自定义的function()
   unique_ptr<Expression> child_;           ///< 这个里面放的是聚合表达式里面的表达式，对应的具体的运算表达式，
+};
+
+/**
+ * 函数表达式
+ * @ingroup Expression
+ * @brief 支持自定义函数表达式，现在支持LENGTH(), ROUND(), DATE_FORMAT()函数
+ */
+class FunctionExpr : public Expression
+{
+public:
+  enum class Type
+  {
+    LENGTH,
+    ROUND,
+    DATE_FORMAT,
+  };
+  FunctionExpr(const char *function_name, vector<unique_ptr<Expression>> &args);
+  virtual ~FunctionExpr() = default;
+
+  unique_ptr<Expression> copy() const override
+  {
+    vector<unique_ptr<Expression>> args;
+    for (auto &arg : args_) {
+      args.emplace_back(arg->copy());
+    }
+    return make_unique<FunctionExpr>(function_name_.c_str(), args);
+  }
+
+  ExprType type() const override { return ExprType::FUNCTION; }
+
+  RC get_value(const Tuple &tuple, Value &value) const override;
+  RC try_get_value(Value &value) const override;
+  RC get_column(Chunk &chunk, Column &column) override;
+
+  AttrType value_type() const override;
+  int value_length() const override;
+
+  const char *function_name() const { return function_name_.c_str(); }
+
+  vector<unique_ptr<Expression>> &args() { return args_; }
+
+  static RC type_from_string(const char *type_str, Type &type);
+
+private:
+  string function_name_;  ///< 函数名称，比如 LENGTH, ROUND, DATE_FORMAT
+  vector<unique_ptr<Expression>> args_;  ///< 函数参数列表
 };

@@ -111,28 +111,14 @@ public:
       int16_t month_   = 0;  ///< 2 bytes
       int16_t day_     = 0;  ///< 2 bytes
       int16_t padding_ = 0;  ///< 对齐填充用的，没什么用，不写编译器也会自己把结构体的大小写到8字节
-
-      DateValue()
-      {
-        year_    = 0;
-        month_   = 0;
-        day_     = 0;
-        padding_ = 0;
-      }
-      DateValue(int x)
-      {
-        year_    = x;
-        month_   = x;
-        day_     = x;
-        padding_ = x;
-      }
-      DateValue(const int16_t year, const int16_t month, const int16_t day)
-      {
-        year_    = year;
-        month_   = month;
-        day_     = day;
-        padding_ = 0;
-      }
+      DateValue();
+      DateValue(int x);
+      DateValue(const int16_t year, const int16_t month, const int16_t day);
+      string get_four_year() const;
+      string get_two_year() const;
+      string get_two_month() const;
+      string get_two_day() const;
+      //
     } date_value_;
   };
 
@@ -172,6 +158,7 @@ private:
   bool     is_null_   = false;
 
   Val value_ = {.int_value_ = 0};
+  mutable Val::DateValue date_cache_;
   /// 是否申请并占有内存, 目前对于 CHARS 类型 own_data_ 为true, 其余类型 own_data_ 为false
   bool own_data_ = false;
 };

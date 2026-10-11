@@ -64,6 +64,19 @@ void Column::init(AttrType attr_type, int attr_len, size_t capacity)
   column_type_ = Type::NORMAL_COLUMN;
 }
 
+void Column::init_text(size_t capacity)
+{
+  reset();
+  attr_type_   = AttrType::CHARS;
+  attr_len_    = sizeof(string_t);
+  count_       = 0;
+  capacity_    = capacity;
+  own_         = true;
+  column_type_ = Type::NORMAL_COLUMN;
+  text_data_   = make_shared<TextData>();
+  text_data_->values.reserve(capacity);
+}
+
 void Column::init(const Value &value, size_t size)
 {
   reset();
@@ -81,18 +94,16 @@ void Column::init(const Value &value, size_t size)
   memcpy(data_, value.data(), attr_len_);
   column_type_ = Type::CONSTANT_COLUMN;
 
-  // 如果 value 是 NULL，设置为 UNDEFINED 类型
+  // 如果 value 是 NULL，记录为 NULL_VALS 类型
   if (value.is_null()) {
-    attr_type_   = AttrType::UNDEFINED;
+    attr_type_   = AttrType::NULL_VALS;
     column_type_ = Type::CONSTANT_COLUMN;
   }
 }
 
 void Column::reset()
 {
-  if (vector_buffer_ != nullptr) {
-    vector_buffer_ = nullptr;
-  }
+  text_data_ = nullptr;
   if (data_ != nullptr && own_) {
     delete[] data_;
   }
@@ -111,6 +122,10 @@ RC Column::append(const char *data, int count)
   if (!own_) {
     LOG_WARN("append data to non-owned column");
     return RC::INTERNAL;
+  }
+  if (text_data_ != nullptr) {
+    LOG_WARN("append fixed-length data to text column");
+    return RC::UNIMPLEMENTED;
   }
   if (count_ + count > capacity_) {
     LOG_WARN("append data to full column");
@@ -135,6 +150,22 @@ RC Column::append_value(const Value &value)
     return RC::INTERNAL;
   }
 
+  if (text_data_ != nullptr) {
+    if (!value.is_null() && value.attr_type() != AttrType::CHARS) {
+      LOG_WARN("append non-string value to text column");
+      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    }
+    if (value.is_null()) {
+      text_data_->values.emplace_back(string_t());
+      text_data_->nulls.emplace_back(1);
+    } else {
+      text_data_->values.emplace_back(text_data_->buffer.add_string(value.data(), value.length()));
+      text_data_->nulls.emplace_back(0);
+    }
+    count_ += 1;
+    return RC::SUCCESS;
+  }
+
   size_t total_bytes = std::min(value.length(), attr_len_);
   memcpy(data_ + count_ * attr_len_, value.data(), total_bytes);
   if (total_bytes < attr_len_)
@@ -146,10 +177,10 @@ RC Column::append_value(const Value &value)
 
 string_t Column::add_text(const char *data, int length)
 {
-  if (vector_buffer_ == nullptr) {
-    vector_buffer_ = make_unique<VectorBuffer>();
+  if (text_data_ == nullptr) {
+    text_data_ = make_shared<TextData>();
   }
-  return vector_buffer_->add_string(data, length);
+  return text_data_->buffer.add_string(data, length);
 }
 
 Value Column::get_value(int index) const
@@ -159,6 +190,17 @@ Value Column::get_value(int index) const
   }
   if (index >= count_ || index < 0) {
     return Value();
+  }
+  if (text_data_ != nullptr) {
+    if (index >= static_cast<int>(text_data_->values.size())) {
+      return Value();
+    }
+    if (index < static_cast<int>(text_data_->nulls.size()) && text_data_->nulls[index] != 0) {
+      Value null_value;
+      null_value.set_null();
+      return null_value;
+    }
+    return Value(text_data_->values[index]);
   }
   // 如果是 CONSTANT_COLUMN 且类型是 NULL_VALS，说明存的是 NULL
   if (column_type_ == Type::CONSTANT_COLUMN && attr_type_ == AttrType::NULL_VALS) {
@@ -185,4 +227,5 @@ void Column::reference(const Column &column)
   this->column_type_ = column.column_type();
   this->attr_type_   = column.attr_type();
   this->attr_len_    = column.attr_len();
+  this->text_data_   = column.text_data_;
 }

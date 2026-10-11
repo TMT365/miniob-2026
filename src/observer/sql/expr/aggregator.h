@@ -17,6 +17,9 @@ See the Mulan PSL v2 for more details. */
 #include "common/value.h"
 #include "common/sys/rc.h"
 
+/**
+ * 聚合算法器，可以理解为最终执行聚合函数的地方
+ */
 class Aggregator
 {
 public:

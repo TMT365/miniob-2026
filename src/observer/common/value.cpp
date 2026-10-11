@@ -19,7 +19,9 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/sstream.h"
 #include "common/lang/string.h"
 #include "common/log/log.h"
+#include "common/time/datetime.h"
 #include "type/date_type.h"
+#include "type/char_type.h"
 
 Value::Value(int val) { set_int(val); }
 
@@ -377,6 +379,7 @@ string_t Value::get_string_t() const
   return string_t(value_.pointer_value_, length_);
 }
 
+// TODO 还没有实现date类型
 bool Value::get_boolean() const
 {
   switch (attr_type_) {
@@ -419,7 +422,20 @@ bool Value::get_boolean() const
   return false;
 }
 const Value::Val::DateValue *Value::get_date() const {
-  return &value_.date_value_;
+  if (attr_type_ == AttrType::UNDEFINED || attr_type_ == AttrType::NULL_VALS || is_null_) {
+    return nullptr;
+  }
+
+  if (attr_type_ == AttrType::DATES) {
+    return &value_.date_value_;
+  }
+
+  Value converted_value;
+  if (cast_to(*this, AttrType::DATES, converted_value) == RC::SUCCESS) {
+    date_cache_ = converted_value.value_.date_value_;
+    return &date_cache_;
+  }
+  return nullptr;
 }
 
 string Value::get_date_to_string() const
@@ -448,4 +464,67 @@ string Value::get_date_to_string() const
     }
   }
   return "";
+}
+Value::Val::DateValue::DateValue()
+{
+  year_ = 0;
+  month_   = 0;
+  day_     = 0;
+  padding_ = 0;
+}
+
+Value::Val::DateValue::DateValue(int x)
+{
+  year_    = x;
+  month_   = x;
+  day_     = x;
+  padding_ = x;
+}
+Value::Val::DateValue::DateValue(const int16_t year, const int16_t month, const int16_t day)
+{
+  year_    = year;
+  month_   = month;
+  day_     = day;
+  padding_ = 0;
+}
+
+string Value::Val::DateValue::get_four_year() const {
+  if (year_ == 0 && month_ == 0 && day_ == 0) {
+    return "0000";
+  }
+  return std::to_string(year_);
+}
+
+string Value::Val::DateValue::get_two_year() const
+{
+  if (year_ == 0 && month_ == 0 && day_ == 0) {
+    return "00";
+  }
+  int year = year_ % 100;
+  if (year < 10) {
+    return "0" + std::to_string(year);
+  }
+  return std::to_string(year);
+}
+
+string Value::Val::DateValue::get_two_month() const
+{
+  if (month_ == 0 && day_ == 0) {
+    return "00";
+  }
+  if (month_ < 10) {
+    return "0" + std::to_string(month_);
+  }
+  return std::to_string(month_);
+}
+
+string Value::Val::DateValue::get_two_day() const
+{
+  if (day_ == 0) {
+    return "00";
+  }
+  if (day_ < 10) {
+    return "0" + std::to_string(day_);
+  }
+  return std::to_string(day_);
 }

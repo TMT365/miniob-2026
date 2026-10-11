@@ -31,6 +31,5 @@ public:
 private:
   RC rewrite_expression(unique_ptr<Expression> &expr, bool &change_made);
 
-private:
   vector<unique_ptr<ExpressionRewriteRule>> expr_rewrite_rules_;
 };

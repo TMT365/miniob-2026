@@ -61,7 +61,6 @@ private:
   RC bind_unbound_field_expression(
       unique_ptr<Expression> &unbound_field_expr, vector<unique_ptr<Expression>> &bound_expressions);
 
-  // SELECT 1, 'abc' FROM table_name; 这种查询语句中，1, 'abc'表示查询具体的值，这里需要将值绑定为具体的值表达式
   RC bind_field_expression(unique_ptr<Expression> &field_expr, vector<unique_ptr<Expression>> &bound_expressions);
 
   // SELECT CAST(field1 AS INT) FROM table_name; 这种查询语句中，CAST(field1 AS INT)表示将字段field1转换为INT类型，这里需要将转换表达式绑定为具体的转换表达式
@@ -85,6 +84,9 @@ private:
   // SELECT COUNT(field1) FROM table_name; 这种查询语句中，COUNT(field1)表示将字段field1进行聚合运算，这里需要将聚合表达式绑定为具体的聚合表达式
   RC bind_aggregate_expression(
       unique_ptr<Expression> &aggregate_expr, vector<unique_ptr<Expression>> &bound_expressions);
+
+  RC bind_function_expression(
+      unique_ptr<Expression> &function_expr, vector<unique_ptr<Expression>> &bound_expressions);
 
   BinderContext &context_;
 };
