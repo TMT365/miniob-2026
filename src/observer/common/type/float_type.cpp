@@ -121,24 +121,20 @@ bool FloatType::my_transform_to_char(const Value &val, Value &result)
 {
   float f = val.get_float();
   std::string s = std::to_string(f);
-  // 可选：std::to_string默认输出6位小数，例如 5 → "5.000000"
-  // 如果评测要求去掉末尾多余的0和小数点，需要额外裁剪
-  if (!s.empty()) {
+  if (s.empty()) {
     return false;
   }
+
+  // std::to_string 默认输出 6 位小数，去掉多余的末尾零和小数点。
   size_t len = s.size();
-  const char *start = s.c_str();
-  const char *end = start + len;
-  // 去掉末尾的0和小数点
-  while (len > 0 && (*end == '0' || *end == '.')) {
-    --end;
+  while (len > 0 && s[len - 1] == '0') {
     --len;
   }
-  // 计算截取后的字符数量
-  size_t new_len = end - start + 1;
+  if (len > 0 && s[len - 1] == '.') {
+    --len;
+  }
 
-  result.set_string(start,static_cast<int>(new_len));
-  return true;
+  result.set_string(s.data(), static_cast<int>(len));
   return true;
 }
 
@@ -164,6 +160,13 @@ bool FloatType::my_transform_to_int(const Value &val, Value &result)
 
 bool FloatType::my_transform_to_dataTime(const Value &val, Value &result) {
   float f = val.get_float();
+  if (!std::isfinite(f)) {
+    return false;
+  }
+  if (f < static_cast<float>(INT64_MIN) || f > static_cast<float>(INT64_MAX)) {
+    return false;
+  }
+
   // 1. 截断小数部分，得到整数（正数直接强转，丢弃小数）
   int64_t num = static_cast<int64_t>(f);
 
