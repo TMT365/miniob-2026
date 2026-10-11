@@ -586,7 +586,16 @@ update_pair:
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM join where group_by /* join -> JoinSqlNode* */
+    SELECT expression_list
+    {
+      $$ = new ParsedSqlNode(SCF_SELECT);
+
+      if ($2 != nullptr) {
+        $$->selection.expressions.swap(*$2);
+        delete $2;
+      }
+    }
+    | SELECT expression_list FROM join where group_by /* join -> JoinSqlNode* */
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
 

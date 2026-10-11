@@ -13,6 +13,7 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "sql/stmt/select_stmt.h"
+#include "sql/stmt/calc_stmt.h"
 #include "common/lang/string.h"
 #include "common/log/log.h"
 #include "sql/stmt/filter_stmt.h"
@@ -102,6 +103,22 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
   BinderContext binder_context; /// 创建BinderContext对象，用于绑定查询涉及的表
 
+  if (select_sql.join == nullptr) {
+    vector<unique_ptr<Expression>> bound_expressions;
+    ExpressionBinder               expression_binder(binder_context);
+    for (unique_ptr<Expression> &expression : select_sql.expressions) {
+      RC rc = expression_binder.bind_expression(expression, bound_expressions);
+      if (OB_FAIL(rc)) {
+        LOG_INFO("bind expression for SELECT without FROM failed. rc=%s", strrc(rc));
+        return rc;
+      }
+    }
+
+    auto *calc_stmt          = new CalcStmt();
+    calc_stmt->expressions() = std::move(bound_expressions);
+    stmt                     = calc_stmt;
+    return RC::SUCCESS;
+  }
 
   vector<Table *>                tables; /// 存储查询涉及的表对象
   unordered_map<string, Table *> table_map; /// 使用unordered_map存储表名和表对象的映射关系，方便后续查询和绑定字段表达式
