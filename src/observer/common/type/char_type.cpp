@@ -94,7 +94,7 @@ RC CharType::to_string(const Value &val, string &result) const
 
 bool CharType::my_atoi(const char *str, Value &result)
 {
-  if (str == nullptr || *str == '\0') {
+  if (str == nullptr) {
     return false;
   }
 
@@ -110,9 +110,16 @@ bool CharType::my_atoi(const char *str, Value &result)
     p++;
   }
 
+  // MySQL 风格的隐式转换：没有有效数字前缀时按 0 处理。
+  if (*p == '\0') {
+    result.set_int(0);
+    return true;
+  }
+
   // 检查第一个字符是否为数字
   if (*p < '0' || *p > '9') {
-    return false;
+    result.set_int(0);
+    return true;
   }
 
   // 解析数字
@@ -139,7 +146,7 @@ bool CharType::my_atoi(const char *str, Value &result)
 
 bool CharType::my_atof(const char *str, Value &result)
 {
-    if (str == nullptr || *str == '\0') {
+    if (str == nullptr) {
         return false;
     }
 
@@ -155,9 +162,16 @@ bool CharType::my_atof(const char *str, Value &result)
         p++;
     }
 
+    // MySQL 风格的隐式转换：没有有效数字前缀时按 0.0 处理。
+    if (*p == '\0') {
+        result.set_float(0.0F);
+        return true;
+    }
+
     // 检查第一个字符是否为数字或小数点
     if ((*p < '0' || *p > '9') && *p != '.') {
-        return false;
+        result.set_float(0.0F);
+        return true;
     }
 
     // 解析整数部分
