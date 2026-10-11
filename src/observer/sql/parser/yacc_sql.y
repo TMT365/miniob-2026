@@ -196,7 +196,9 @@ UnboundFunctionExpr *create_function_expression(const char *function_name,
 %type <relation_list>       rel_list
 %type <expression>          expression
 %type <expression>          function_call
+%type <expression>          select_item
 %type <expression_list>     expression_list
+%type <expression_list>     select_expression_list
 %type <expression_list>     group_by
 %type <update_pair>         update_pair
 %type <update_pair_list>    update_pair_list
@@ -586,7 +588,7 @@ update_pair:
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list
+    SELECT select_expression_list
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
 
@@ -595,7 +597,7 @@ select_stmt:        /*  select 语句的语法解析树*/
         delete $2;
       }
     }
-    | SELECT expression_list FROM join where group_by /* join -> JoinSqlNode* */
+    | SELECT select_expression_list FROM join where group_by /* join -> JoinSqlNode* */
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
 
@@ -645,6 +647,30 @@ expression_list: /* 现在开始支持使用() */
 
       }
       $$->emplace($$->begin(), $1);
+    }
+    ;
+select_expression_list:
+    select_item
+    {
+      $$ = new vector<unique_ptr<Expression>>;
+      $$->emplace_back($1);
+    }
+    | select_item COMMA select_expression_list
+    {
+      $$ = $3;
+      $$->emplace($$->begin(), $1);
+    }
+    ;
+select_item:
+    expression
+    {
+      $$ = $1;
+    }
+    | expression ID
+    {
+      $1->set_name($2);
+      free($2);
+      $$ = $1;
     }
     ;
 expression:  /* 括号能算在表达式里面 */
