@@ -259,7 +259,7 @@ void Value::set_value(const Value &value)
     } break;
     case AttrType::NULL_VALS: {
       set_null();
-    }
+    } break;
     case AttrType::BOOLEANS: {
       set_boolean(value.get_boolean());
     } break;
