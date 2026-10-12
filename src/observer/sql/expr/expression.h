@@ -619,6 +619,8 @@ public:
     return make_unique<FunctionExpr>(function_name_.c_str(), args);
   }
 
+  void add_arg(unique_ptr<Expression> &arg) { args_.emplace_back(std::move(arg)); }
+
   ExprType type() const override { return ExprType::FUNCTION; }
 
   RC get_value(const Tuple &tuple, Value &value) const override;
