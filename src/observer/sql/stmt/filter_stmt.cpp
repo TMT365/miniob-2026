@@ -136,6 +136,8 @@ RC FilterStmt::create_filter_unit_recursion(
    *    [+,ARITHMETIC]left_expr          right_expr[+, ARITHMETIC]
    *                   /   \                 /    \
    *                col1   3[ValueExpr]     ....       ...
+   *  现在支持了自定义函数 function(col2) >= function(col1) + 3 + col4 ...这种了，单个function(col2)会被解析成UnboundFunctionExpr
+   *  同时function(col2 + col3) >= ...，这种会被解析成ArithmeticExpr
    */
   if (expr->type()==ExprType::UNBOUND_FIELD) {
     Table           *table      = nullptr;
@@ -184,6 +186,20 @@ RC FilterStmt::create_filter_unit_recursion(
       return rc;
     }
     filter_obj.init_value(v);
+  } else if (expr->type() == ExprType::UNBOUND_FUNCTION) {
+    auto                          *unbound_func_expr = static_cast<UnboundFunctionExpr *>(expr);
+    vector<unique_ptr<Expression>> args_expression;
+    // 递归绑定函数参数 function(expression, expression, ...) 其中每个expression也许是其它的类型的表达式
+    for (auto &arg : unbound_func_expr->args()) {
+      unique_ptr<Expression> bound_arg;
+      rc = bind_expression(db, default_table, tables, arg.get(), bound_arg);
+      if (rc != RC::SUCCESS) {
+        return rc;
+      }
+      args_expression.emplace_back(bound_arg.release());
+    }
+    FunctionExpr *bound_func_expr = new FunctionExpr(unbound_func_expr->function_name(), args_expression);
+    filter_obj.init_expr(bound_func_expr);
   } else {
     LOG_WARN("invalid expression");
     return RC::INVALID_ARGUMENT;
