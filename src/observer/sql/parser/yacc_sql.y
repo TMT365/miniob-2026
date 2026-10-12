@@ -496,7 +496,7 @@ value_list:
     }
     ;
 value:
-    | NUMBER {
+    NUMBER {
       $$ = new Value((int)$1);
 
       @$ = @1;
@@ -657,7 +657,11 @@ select_expression_list:
     }
     | select_item COMMA select_expression_list
     {
-      $$ = $3;
+      if ($3 != nullptr) {
+        $$ = $3;
+        } else {
+          $$ = new vector<unique_ptr<Expression>>;
+        }
       $$->emplace($$->begin(), $1);
     }
     ;
@@ -666,10 +670,9 @@ select_item:
     {
       $$ = $1;
     }
-    | expression ID
+    | expression ID /* 隐式表达式别名 */
     {
       $1->set_name($2);
-      free($2);
       $$ = $1;
     }
     ;
