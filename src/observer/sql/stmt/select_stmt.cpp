@@ -103,6 +103,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
   BinderContext binder_context; /// 创建BinderContext对象，用于绑定查询涉及的表
 
+  // SELECT LENGTH(常量) AS len1, LENGTH(常量) AS len2
   if (select_sql.join == nullptr) {
     vector<unique_ptr<Expression>> bound_expressions;
     ExpressionBinder               expression_binder(binder_context);
