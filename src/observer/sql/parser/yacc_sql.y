@@ -66,6 +66,7 @@ UnboundFunctionExpr *create_function_expression(const char *function_name,
 
 //标识tokens
 %token  SEMICOLON
+        AS
         BY
         CREATE
         DROP
@@ -674,6 +675,11 @@ select_item:
     {
       $1->set_name($2);
       $$ = $1;
+    }
+    | expression AS ID /* 隐式表达式别名 */
+    {
+       $1->set_name($3);
+       $$ = $1;
     }
     ;
 expression:  /* 括号能算在表达式里面 */
