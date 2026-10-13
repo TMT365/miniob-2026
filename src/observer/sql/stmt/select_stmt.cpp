@@ -40,7 +40,7 @@ SelectStmt::~SelectStmt()
 }
 
 RC SelectStmt::semantic_analyze_join_node(
-    Db *db, JoinSqlNode *join, unordered_map<string, Table *> &table_map, vector<Table *> &tables)
+    Db *db, JoinSqlNode *join, unordered_map<string, Table *> &table_map, vector<BinderContext::TableRef> &tables)
 {
   // 递归寻找
   RC rc = RC::SUCCESS;
@@ -59,10 +59,16 @@ RC SelectStmt::semantic_analyze_join_node(
       LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
       return RC::SCHEMA_TABLE_NOT_EXIST;
     }
+    // parser 已经把 "无别名" 的情况规范为 table_alias == table_name。
+    const string &alias = join->table_alias;
     // TODO 使用insert()是不会插入重复对象的，table_map 是无序表，插入顺序不是输出顺序
     table_map.insert({table_name, table});
+    // 把 alias 也作为 key 插一份，让 FilterStmt（不走 BinderContext）也能按 alias 查表。
+    if (alias != table_name) {
+      table_map.insert({alias, table});
+    }
     // 所以要使用tables保证输出有序
-    tables.push_back(table);
+    tables.push_back({table, alias});
   } else if (join->type == TableRefType::JOIN_NODE) {
     rc = semantic_analyze_join_node(db, join->left.get(), table_map, tables);
     if (rc != RC::SUCCESS) {
@@ -121,8 +127,9 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     return RC::SUCCESS;
   }
 
-  vector<Table *>                tables; /// 存储查询涉及的表对象
-  unordered_map<string, Table *> table_map; /// 使用unordered_map存储表名和表对象的映射关系，方便后续查询和绑定字段表达式
+  vector<BinderContext::TableRef> tables;  /// 存储查询涉及的表对象（含别名）
+  unordered_map<string, Table *>
+      table_map;  /// 使用unordered_map存储表名和表对象的映射关系，方便后续查询和绑定字段表达式
 
   // 在递归找表的同时创建JOIN stmt
   RC rc = semantic_analyze_join_node(db, select_sql.join.get(), table_map, tables);
@@ -132,7 +139,8 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   }
 
   for (auto &table : tables) {
-    binder_context.add_table(table); /// 将表对象添加到BinderContext中，方便后续绑定字段表达式
+    binder_context.add_table(
+        table.table, table.alias);  /// 将表对象（含别名）添加到BinderContext中，方便后续绑定字段表达式
   }
 
 
@@ -157,7 +165,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
   Table *default_table = nullptr;
   if (tables.size() == 1) {
-    default_table = tables[0];
+    default_table = tables[0].table;
   }
 
   /*

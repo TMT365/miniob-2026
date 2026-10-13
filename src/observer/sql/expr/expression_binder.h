@@ -22,18 +22,31 @@ public:
   BinderContext()          = default;
   virtual ~BinderContext() = default;
 
-  void add_table(Table *table) { query_tables_.push_back(table); }
+  /**
+   * @brief 描述绑定到 BinderContext 的一个表：真实表对象 + 别名。
+   * @details alias 始终非空；alias == table->name() 表示没有额外别名。parser 在 join_item
+   *          处已经做了这层规范化（无别名时把 table_alias 设为 table_name）。
+   */
+  struct TableRef
+  {
+    Table *table;
+    string alias;
+  };
+
+  /// alias 为空时回退到 table->name()，便于没有别名语法的 caller（如 UPDATE）继续按原行为工作。
+  void add_table(Table *table, const string &alias = string())
+  { table_refs_.push_back({table, alias.empty() ? string(table->name()) : alias}); }
 
   Table *find_table(const char *table_name) const;
 
   /**
    * @brief 获取查询涉及的表对象
-   * @return 查询涉及的表对象
+   * @return 查询涉及的表对象（含别名）
    */
-  const vector<Table *> &query_tables() const { return query_tables_; }
+  const vector<TableRef> &query_tables() const { return table_refs_; }
 
 private:
-  vector<Table *> query_tables_; /// 查询涉及的表对象，里面封装了表名、字段信息等
+  vector<TableRef> table_refs_;  /// 查询涉及的表对象，里面封装了表名、字段信息、别名等
 };
 
 /**

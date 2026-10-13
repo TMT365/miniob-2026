@@ -22,18 +22,22 @@ using namespace common;
 
 Table *BinderContext::find_table(const char *table_name) const
 {
-  /* C++ lambda 表达式 [table_name](Table *table) mutable -> 返回类型 { return 0 == strcasecmp(table_name, table->name()); };
-   * strcasecmp() 函数用于比较两个字符串，忽略大小写。返回值为0表示两个字符串相等。
-   */
-  auto pred = [table_name](Table *table) { return 0 == strcasecmp(table_name, table->name()); };
-
-  //在一个范围 (range / 容器)里，找到第一个满足断言（predicate）的元素，返回对应的迭代器。ranges::borrowed_iterator_t<R>，对其解引用就是容器对象
-  auto iter = ranges::find_if(query_tables_, pred);
-  if (iter == query_tables_.end()) {
+  if (nullptr == table_name) {
     return nullptr;
   }
-  // 解引用，获取Table *
-  return *iter;
+  // 先按真名匹配（兼容没有别名语法的旧 caller），再按 alias 匹配。
+  // 真名优先，保证 "from t t" 这种 alias==真名 时行为确定。
+  for (const TableRef &ref : table_refs_) {
+    if (0 == strcasecmp(table_name, ref.table->name())) {
+      return ref.table;
+    }
+  }
+  for (const TableRef &ref : table_refs_) {
+    if (0 == strcasecmp(table_name, ref.alias.c_str())) {
+      return ref.table;
+    }
+  }
+  return nullptr;
 }
 
 /**
@@ -135,8 +139,10 @@ RC ExpressionBinder::bind_star_expression(
 
     tables_to_wildcard.push_back(table);
   } else {
-    const vector<Table *> &all_tables = context_.query_tables();
-    tables_to_wildcard.insert(tables_to_wildcard.end(), all_tables.begin(), all_tables.end());
+    const vector<BinderContext::TableRef> &all_refs = context_.query_tables();
+    for (const auto &ref : all_refs) {
+      tables_to_wildcard.push_back(ref.table);
+    }
   }
 
   // 遍历需要绑定通配符(*)的表对象，将通配符(*)解析为具体的字段表达式，从原来的 Unbound 转换为 FieldExpr，并将其添加到 bound_expressions 中
@@ -167,7 +173,7 @@ RC ExpressionBinder::bind_unbound_field_expression(
       return RC::SCHEMA_TABLE_NOT_EXIST;
     }
 
-    table = context_.query_tables()[0];
+    table = context_.query_tables()[0].table;
   } else {
     table = context_.find_table(table_name);
     if (nullptr == table) {
@@ -535,8 +541,8 @@ RC ExpressionBinder::bind_function_expression(
       bound_args[0]->value_type() != AttrType::CHARS) {
     return RC::INVALID_ARGUMENT;
   }
-  if (function_type == FunctionExpr::Type::ROUND && bound_args[0]->value_type() != AttrType::FLOATS &&
-      bound_args[1]->value_type() != AttrType::INTS) {
+  if (function_type == FunctionExpr::Type::ROUND &&
+      (bound_args[0]->value_type() != AttrType::FLOATS || bound_args[1]->value_type() != AttrType::INTS)) {
     return RC::INVALID_ARGUMENT;
   }
   if (function_type == FunctionExpr::Type::DATE_FORMAT &&

@@ -16,6 +16,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/sys/rc.h"
 #include "sql/stmt/stmt.h"
+#include "sql/expr/expression_binder.h"
 #include "storage/field/field.h"
 
 class FieldMeta;
@@ -54,5 +55,5 @@ private:
   JoinSqlNode                   *join_sql_node_;
   ;
   static RC semantic_analyze_join_node(
-      Db *db, JoinSqlNode *join, unordered_map<string, Table *> &table_map,vector<Table *> &tables);
+      Db *db, JoinSqlNode *join, unordered_map<string, Table *> &table_map, vector<BinderContext::TableRef> &tables);
 };

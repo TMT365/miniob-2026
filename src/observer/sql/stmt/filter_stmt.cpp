@@ -198,6 +198,12 @@ RC FilterStmt::create_filter_unit_recursion(
       }
       args_expression.emplace_back(bound_arg.release());
     }
+    // 跟 SELECT 那边的 binder 一样，round(x) 在只有一个参数时自动补成 round(x, 0)。
+    // 不补的话，evaluate_function 在扫描阶段会因为 args.size() != 2 而返回失败，
+    // 导致 round(...) > round(...) 这种写在 WHERE 里的判断过滤掉所有行。
+    if (0 == strcasecmp(unbound_func_expr->function_name(), "round") && args_expression.size() == 1) {
+      args_expression.emplace_back(new ValueExpr(Value(0)));
+    }
     FunctionExpr *bound_func_expr = new FunctionExpr(unbound_func_expr->function_name(), args_expression);
     filter_obj.init_expr(bound_func_expr);
   } else {
