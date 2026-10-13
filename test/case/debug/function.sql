@@ -26,12 +26,14 @@
 -- init data
 CREATE TABLE function_table(id int, name char(20), score float, u_date date);
 -- CREATE TABLE function_table_2(id int, name char(30), score float, u_date date);
-insert into function_table VALUES (4, 'Z4682', 67.93, '2021-07-31');
+insert into function_table VALUES (4, 'Z4682', -67.50, '2021-07-31');
 insert into function_table VALUES (5, 'Z3I8SJF1MCL4682', 7.93, '2021-07-31');
 insert into function_table VALUES (7, '4VQD0M7SF9TXVD7BYLC', 5.91, '2016-10-25');
 insert into function_table VALUES (8, 'RAQ93QE9K1L', 3.91, '2023-02-03');
-select length(name) from function_table;
-select id, length(name) from function_table;
-select length(name) from function_table where length(name)>=8;
-select id, length(name) from function_table where length('988999999')>=8;
-select id, length(name) from function_table where length(name)>=8;
+-- select length(name) from function_table;
+-- select id, length(name) from function_table;
+-- select length(name) from function_table where length(name)>=8;
+-- select id, length(name) from function_table where length('988999999')>=8;
+-- select id, length(name) AS len1 from function_table where length(name)>=8;
+select round(score,2) from function_table;
+exit
