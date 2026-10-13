@@ -494,13 +494,18 @@ RC ExpressionBinder::bind_function_expression(
     aggregate_expr->set_name(unbound->name());
     return bind_aggregate_expression(aggregate_expr, bound_expressions);
   }
-
-  // 如果是DATE_FORMAT(...,...)。就会有2个参数
+  FunctionExpr::Type function_type;
+  RC                 rc = FunctionExpr::type_from_string(unbound->function_name(), function_type);
+  if (OB_FAIL(rc)) {
+    LOG_WARN("unsupported function name: %s", unbound->function_name());
+    return rc;
+  }
+  // 如果是DATE_FORMAT(...,...) 和 round()就会有2个参数
   vector<unique_ptr<Expression>> bound_args;
   bound_args.reserve(args.size());
   for (auto &arg : args) {
     vector<unique_ptr<Expression>> one_arg;
-    RC rc = bind_expression(arg, one_arg);
+    rc = bind_expression(arg, one_arg);
     if (OB_FAIL(rc)) {
       return rc;
     }
@@ -509,15 +514,18 @@ RC ExpressionBinder::bind_function_expression(
     }
     bound_args.emplace_back(std::move(one_arg.front()));
   }
-
-  FunctionExpr::Type function_type;
-  RC rc = FunctionExpr::type_from_string(unbound->function_name(), function_type);
-  if (OB_FAIL(rc)) {
-    LOG_WARN("unsupported function name: %s", unbound->function_name());
-    return rc;
+  /* NOTE
+   * date_format()函数必须有两个参数，其他函数必须有一个参数，ROUND()函数可以有第二个参数用来指定保留几位小数，这里简化后直接是默认第二个
+   * 是0
+   * */
+  const size_t expected_args =
+      function_type == FunctionExpr::Type::DATE_FORMAT || function_type == FunctionExpr::Type::ROUND ? 2 : 1;
+  if (function_type == FunctionExpr::Type::ROUND && bound_args.size() == 1) {
+    // 如果是ROUND函数且只有一个参数，那么就默认第二个参数为0
+    ValueExpr *value_expr = new ValueExpr(Value(0));
+    bound_args.emplace_back(value_expr);
   }
 
-  const size_t expected_args = function_type == FunctionExpr::Type::DATE_FORMAT ? 2 : 1;
   if (bound_args.size() != expected_args) {
     LOG_WARN("invalid argument count for function: %s", unbound->function_name());
     return RC::INVALID_ARGUMENT;
@@ -527,8 +535,8 @@ RC ExpressionBinder::bind_function_expression(
       bound_args[0]->value_type() != AttrType::CHARS) {
     return RC::INVALID_ARGUMENT;
   }
-  if (function_type == FunctionExpr::Type::ROUND &&
-      bound_args[0]->value_type() != AttrType::FLOATS) {
+  if (function_type == FunctionExpr::Type::ROUND && bound_args[0]->value_type() != AttrType::FLOATS &&
+      bound_args[1]->value_type() != AttrType::INTS) {
     return RC::INVALID_ARGUMENT;
   }
   if (function_type == FunctionExpr::Type::DATE_FORMAT &&

@@ -718,10 +718,23 @@ RC evaluate_function(FunctionExpr::Type type, const vector<Value> &args, Value &
     }
     // 比赛要求float
     case FunctionExpr::Type::ROUND: {
-      if (args.size() != 1 || args[0].attr_type() != AttrType::FLOATS) {
+      if (args.size() != 2 || args[0].attr_type() != AttrType::FLOATS || args[1].attr_type() != AttrType::INTS) {
         return RC::INVALID_ARGUMENT;
       }
-      value.set_float(static_cast<float>(std::round(args[0].get_float())));
+      value.set_float([&]() -> float {
+        float num = args[0].get_float();
+        int   n   = args[1].get_int();
+        // 保护：负数小数位 / 位数太大直接返回原值
+        if (n < 0)
+          n = 0;
+        if (n > 6)
+          n = 6;  // float精度最多6~7位有效数字，超过没有意义
+        float f = 1.0f;
+        for (int i = 0; i < n; i++) {
+          f *= 10.0f;
+        }
+        return static_cast<float>(std::round(num * f) / f);
+      }());
       return RC::SUCCESS;
     }
     // 这个是Date和char
