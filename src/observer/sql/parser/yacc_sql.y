@@ -184,6 +184,7 @@ UnboundFunctionExpr *create_function_expression(const char *function_name,
 %type <comp>                comp_op
 %type <rel_attr>            rel_attr
 %type <join>                join
+%type <join>                join_item
 %type <attr_infos>          attr_def_list
 %type <attr_info>           attr_def
 %type <value_list>          value_list
@@ -740,16 +741,8 @@ rel_attr:
     }
     ;
 join:  /* JoinSqlNode* */
-     ID {
-        JoinSqlNode *node = new JoinSqlNode();
-        node->left = nullptr;
-        node->right = nullptr;
-        node->type = TableRefType::BASE_TABLE;
-        node->table_name = $1;
-        node->table_alias = $1;
-        node->on_conditions.clear();
-        node->on_filter_stmt=nullptr;
-        $$ = (node);
+     join_item {
+        $$ = ($1);
      }
      | join JOIN join ON join_condition_list {
         JoinSqlNode *node = new JoinSqlNode();
@@ -794,6 +787,44 @@ join:  /* JoinSqlNode* */
         $$ = (node);
      }
      ;
+join_item:
+    /* empty */ {
+      $$ = nullptr;
+    }
+    | ID {
+      JoinSqlNode *node = new JoinSqlNode();
+      node->left = nullptr;
+      node->right = nullptr;
+      node->type = TableRefType::BASE_TABLE;
+      node->table_name = $1;
+      node->table_alias = $1;
+      node->on_conditions.clear();
+      node->on_filter_stmt=nullptr;
+      $$ = (node);
+    }
+   |ID ID {
+      JoinSqlNode *node = new JoinSqlNode();
+      node->left = nullptr;
+      node->right = nullptr;
+      node->type = TableRefType::BASE_TABLE;
+      node->table_name = $1;
+      node->table_alias = $2;
+      node->on_conditions.clear();
+      node->on_filter_stmt=nullptr;
+      $$ = (node);
+    }
+  | ID AS ID {
+      JoinSqlNode *node = new JoinSqlNode();
+      node->left = nullptr;
+      node->right = nullptr;
+      node->type = TableRefType::BASE_TABLE;
+      node->table_name = $1;
+      node->table_alias = $3;
+      node->on_conditions.clear();
+      node->on_filter_stmt=nullptr;
+      $$ = (node);
+  }
+  ;
 comma_join_condition:
     /* empty */ {
       $$ = nullptr;

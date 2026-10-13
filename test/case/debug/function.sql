@@ -9,31 +9,18 @@
 -- SELECT ID,ROUND(COL1), DATE_FORMAT(COL2, '%z-%n-%d'),LENGTH(COL3) FROM FUNC_TABLE;
 -- SELECT ID, COUNT(*), SUM(COL1), AVG(COL1), DATE_FORMAT(COL2, '%z-%n-%d'), LENGTH(COL3) FROM FUNC_TABLE;
 
-
--- select length('10H93OM08NHSY0XT6KWWMDW9DFXY382YNJ0CDT3ZSQORR99MKCEWY0') len1, length('QQ1KPM5SBRCKSIX21DSF92WH3PZUM9EUD7G1DHCTPIC9LK6MTM25Q365W1KK5J637N') len2;
--- - 1 | 13
--- - 1 | 19
--- - 2 | 12
--- - 4 | 18
--- - 5 | 15
--- - 6 | 18
--- - 7 | 19
--- - 7 | 19
--- - 9 | 16
--- - 9 | 20
 -- + FAILURE
 -- below are some requests executed before(partial) --
 -- init data
 CREATE TABLE function_table(id int, name char(20), score float, u_date date);
--- CREATE TABLE function_table_2(id int, name char(30), score float, u_date date);
-insert into function_table VALUES (4, 'Z4682', -67.50, '2021-07-31');
-insert into function_table VALUES (5, 'Z3I8SJF1MCL4682', 7.93, '2021-07-31');
-insert into function_table VALUES (7, '4VQD0M7SF9TXVD7BYLC', 5.91, '2016-10-25');
-insert into function_table VALUES (8, 'RAQ93QE9K1L', 3.91, '2023-02-03');
--- select length(name) from function_table;
--- select id, length(name) from function_table;
--- select length(name) from function_table where length(name)>=8;
--- select id, length(name) from function_table where length('988999999')>=8;
--- select id, length(name) AS len1 from function_table where length(name)>=8;
-select round(score,2) from function_table;
+CREATE TABLE function_table_2(id int, name char(30), score float, u_date date);
+insert into function_table VALUES (1, 'UHWES37X', 3.36, '2021-09-14');
+insert into function_table VALUES (7, '2E1R01HW', 9.98, '2022-11-10');
+insert into function_table VALUES (9, 'XXGC', 9.86, '2016-05-31');
+
+insert into function_table_2 VALUES (1, 'readf', 23.132123, '2111-09-14');
+insert into function_table_2 VALUES (4, 'sedaeee', -0.3234, '3234-11-10');
+insert into function_table_2 VALUES (99, 'eweax', 9.99311, '1256-05-31');
+-- select t1.id, t1.name, round(t1.score) as sc
+select t1.id, t1.name, round(t1.score) as score1, t2.id, t2.name, round(t2.score) as score2 from function_table t1, function_table_2 t2 where t1.id > t2.id and round(t1.score) > round(t2.score);
 exit
