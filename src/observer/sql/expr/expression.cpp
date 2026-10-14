@@ -739,8 +739,17 @@ RC evaluate_function(FunctionExpr::Type type, const vector<Value> &args, Value &
     }
     // 这个是Date和char
     case FunctionExpr::Type::DATE_FORMAT: {
-      if (args.size() != 2 || args[0].attr_type() != AttrType::DATES ||
-          args[1].attr_type() != AttrType::CHARS) {
+      if (args.size() != 2 || args[1].attr_type() != AttrType::CHARS) {
+        return RC::INVALID_ARGUMENT;
+      }
+      // 第一个参数允许是 DATES（日期列）或者 CHARS（字符串字面量，例如 date_format('2009-03-11', ...)）。
+      // 如果是字符串，先尝试按 YYYY-MM-DD / YYYY-M-D 等格式解析成日期，解析失败则报错。
+      Value date_value = args[0];
+      if (date_value.attr_type() == AttrType::CHARS) {
+        if (!date_value.set_date(date_value.get_string())) {
+          return RC::INVALID_ARGUMENT;
+        }
+      } else if (date_value.attr_type() != AttrType::DATES) {
         return RC::INVALID_ARGUMENT;
       }
       static const char *month_names[] = {
@@ -748,7 +757,7 @@ RC evaluate_function(FunctionExpr::Type type, const vector<Value> &args, Value &
           "July", "August", "September", "October", "November", "December"};
 
       // get_date()会进行隐式的类型转换，不合理会放回nullptr
-      const Value::Val::DateValue *date = args[0].get_date();
+      const Value::Val::DateValue *date = date_value.get_date();
       // 这里的检测主要是为了防止Char类型不合理，但是应该不存在这样情况，因为我在给Value添加Date类型的时候已经做了检测
       if (date == nullptr) {
         return RC::INVALID_ARGUMENT;

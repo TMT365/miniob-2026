@@ -545,10 +545,16 @@ RC ExpressionBinder::bind_function_expression(
       (bound_args[0]->value_type() != AttrType::FLOATS || bound_args[1]->value_type() != AttrType::INTS)) {
     return RC::INVALID_ARGUMENT;
   }
-  if (function_type == FunctionExpr::Type::DATE_FORMAT &&
-      (bound_args[0]->value_type() != AttrType::DATES ||
-       bound_args[1]->value_type() != AttrType::CHARS)) {
-    return RC::INVALID_ARGUMENT;
+  // DATE_FORMAT 的第一个参数允许是 DATES（来自日期列）或者 CHARS（字符串字面量，例如
+  // `date_format('2009-03-11', '%y/%m/%d')`）。运行时再把 CHARS 解析成日期。
+  if (function_type == FunctionExpr::Type::DATE_FORMAT) {
+    const AttrType arg0_type = bound_args[0]->value_type();
+    if (arg0_type != AttrType::DATES && arg0_type != AttrType::CHARS) {
+      return RC::INVALID_ARGUMENT;
+    }
+    if (bound_args[1]->value_type() != AttrType::CHARS) {
+      return RC::INVALID_ARGUMENT;
+    }
   }
 
   auto function = make_unique<FunctionExpr>(unbound->function_name(), bound_args);
