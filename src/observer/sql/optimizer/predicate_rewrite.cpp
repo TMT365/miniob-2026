@@ -39,7 +39,7 @@ RC PredicateRewriteRule::rewrite(unique_ptr<LogicalOperator> &oper, bool &change
 
   // 如果仅有的一个子节点是predicate
   // 并且这个子节点可以判断为恒为TRUE，那么可以省略这个子节点，并把他的子节点们（就是孙子节点）接管过来
-  // 如果可以判断恒为false，那么就可以删除子节点
+  // 如果可以判断恒为false，谓词算子要保留：它求值出来是 false，结果就是空集
   auto value_expr = static_cast<ValueExpr *>(expr.get());
   bool bool_value = value_expr->get_value().get_boolean();
   if (true == bool_value) {
@@ -49,10 +49,11 @@ RC PredicateRewriteRule::rewrite(unique_ptr<LogicalOperator> &oper, bool &change
     for (auto &grand_child_oper : grand_child_opers) {
       oper->add_child(std::move(grand_child_oper));
     }
-  } else {
-    child_opers.clear();
-  }
 
-  change_made = true;
+    change_made = true;
+  }
+  // 恒为 false 的情况这里什么都不做。
+  // 不能把谓词算子删掉：删掉之后谓词就失效了，数据反而会全部放行；
+  // 而且父节点会因为没有子节点而生成不出物理计划(比如 group by 要求恰好一个子节点)。
   return RC::SUCCESS;
 }
