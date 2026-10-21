@@ -21,6 +21,7 @@ See the Mulan PSL v2 for more details. */
 class CLogManager;
 class LogHandler;
 class MvccTrxLogHandler;
+class Field;
 
 class MvccTrxKit : public TrxKit
 {
@@ -35,11 +36,6 @@ public:
   Trx *create_trx(LogHandler &log_handler, int32_t trx_id) override;
   void destroy_trx(Trx *trx) override;
 
-  /**
-   * @brief 找到对应事务号的事务
-   * @details 当前仅在recover场景下使用
-   */
-  Trx *find_trx(int32_t trx_id) override;
   void all_trxes(vector<Trx *> &trxes) override;
 
   LogReplayer *create_log_replayer(Db &db, LogHandler &log_handler) override;
@@ -78,6 +74,8 @@ public:
 
   RC insert_record(Table *table, Record &record) override;
   RC delete_record(Table *table, Record &record) override;
+  RC update_record(Table *table, Record &old_record, Record &new_record, Field *field, const Value *value) override { return RC::UNIMPLEMENTED; };
+  RC update_record(Table *table, Record &old_record, Record &new_record) override { return RC::UNIMPLEMENTED; };
 
   /**
    * @brief 当访问到某条数据时，使用此函数来判断是否可见，或者是否有访问冲突

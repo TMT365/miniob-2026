@@ -64,11 +64,12 @@ class Result(Enum):
 
 class GlobalConfig:
   default_encoding = "UTF-8"
-  debug = False
-  source_code_build_path_name = "build"
+  debug = True
+  # 调试目录
+  source_code_build_path_name = "build_debug"
 
 def __get_build_path(work_dir: str):
-  return work_dir + '/' + GlobalConfig.source_code_build_path_name
+  return work_dir  # work_dir already points to build_debug directory
 
 class ResultWriter:
   '''
@@ -441,10 +442,20 @@ class CommandRunner:
     return True
 
   def run_sql(self, sql):
+    _logger.info("\033[36m正在执行 SQL: %s\033[0m", sql)  # 青色
     self.__result_writer.write_line(sql)
     result, data = self.__current_client.run_sql(sql)
+    try:
+      data_str = data.strip() if data else ""
+    except Exception:
+      data_str = str(data) if data else ""
     if result is False:
+      _logger.info("\033[31m执行输出: %s\033[0m", data_str)  # 红色
       return False
+    if data_str == "SUCCESS":
+      _logger.info("\033[32m执行输出: %s\033[0m", data_str)  # 绿色
+    else:
+      _logger.info("\033[31m执行输出: %s\033[0m", data_str)  # 红色
     self.__result_writer.write(data)
     return True
 
@@ -481,11 +492,38 @@ class CommandRunner:
       result = self.run_connection(command_arg)
     elif 'sort' == command:
       result = self.run_sort(command_arg)
+    elif command.startswith('ensure'):
+      result = self.run_ensure(command, command_arg)
     else:
       _logger.error("No such command %s", command)
       result = False
 
     return result
+  
+  def run_ensure(self, command: str, sql: str):
+    self.__result_writer.write_line(command + " " + sql)
+    result, data = self.__current_client.run_sql("explain " + sql)
+    if result is False:
+      return False
+    if command == "ensure:hashjoin":
+      if len(data.split("HASH_JOIN")) != 2:
+        return False
+    elif command == "ensure:hashjoin*2":
+      if len(data.split("HASH_JOIN")) != 3:
+        return False
+    elif command == "ensure:hashjoin*4":
+      if len(data.split("HASH_JOIN")) != 5:
+        return False
+    elif command == "ensure:nlj":
+      if len(data.split("NESTED_LOOP_JOIN")) != 2:
+        return False
+    elif command == "ensure:nlj*2":
+      if len(data.split("NESTED_LOOP_JOIN")) != 3:
+        return False
+    else:
+      _logger.error("No such ensure command %s", command)
+      return False
+    return True
     
   def run_anything(self, argline: str):
     argline = argline.strip()
@@ -530,6 +568,8 @@ class TestCase:
 
   def result_file(self, base_dir):
     subdir = ''
+    if base_dir.endswith('/'):
+      base_dir = base_dir[:-1]
     return base_dir + "/" + subdir + "/" + self.__name + ".result"
 
   def tmp_result_file(self, base_dir):
@@ -675,12 +715,14 @@ class TestSuite:
       lines1 = f1.readlines()
       lines2 = f2.readlines()
       if len(lines1) != len(lines2):
+        _logger.info('file1=%s, file2=%s, 行数不同: file1有%d行, file2有%d行', file1, file2, len(lines1), len(lines2))
         return False
 
       line_num = len(lines1)
       for i in range(line_num):
         if lines1[i].upper() != lines2[i].upper():
-          _logger.info('file1=%s, file2=%s, line1=%s, line2=%s', file1, file2, lines1[i], lines2[i])
+          _logger.info('file1=%s, file2=%s, 第%d行不匹配: file1=%s, file2=%s',
+                       file1, file2, i+1, lines1[i].strip(), lines2[i].strip())
           return False
       return True
 
@@ -720,7 +762,7 @@ class TestSuite:
 
     result_file_name = test_case.result_file(self.__test_result_base_dir)
     if self.__report_only:
-      os.rename(result_tmp_file_name, result_file_name)
+      shutil.copy(result_tmp_file_name, result_file_name)
       return True
     else:
       result = self.__compare_files(result_tmp_file_name, result_file_name)
@@ -873,17 +915,20 @@ def __init_options():
   # 之前已经编译过，是否需要重新编译，还是直接执行make就可以了
   options_parser.add_argument('--compile-rebuild', action='store_true', default=False, dest='compile_rebuild',
                             help='whether rebuild if build path exists')
+  # 跳过编译，直接使用已编译的二进制文件
+  options_parser.add_argument('--skip-compile', action='store_true', default=False, dest='skip_compile',
+                            help='skip compile and use existing binary')
 
   options = options_parser.parse_args(sys.argv[1:])
 
   realpath = os.path.realpath(__file__)
   current_path = os.path.dirname(realpath)
-  if not options.work_dir:
-    options.work_dir = tempfile.gettempdir() + '/miniob'
-    _logger.info('use %s as work directory', options.work_dir)
   if not options.project_dir:
-    options.project_dir = os.path.realpath(current_path + '/../..')
+    options.project_dir = os.path.abspath(current_path + '/../..')
     _logger.info('Auto detect project dir: %s', options.project_dir)
+  if not options.work_dir:
+    options.work_dir = os.path.abspath(options.project_dir + '/build_debug')
+    _logger.info('use %s as work directory', options.work_dir)
   return options
 
 def __init_log(options):
@@ -914,14 +959,14 @@ def __init_log(options):
 
 def __init_test_suite(options) -> TestSuite:
   test_suite = TestSuite()
-  test_suite.set_test_case_base_dir(os.path.abspath(options.project_dir + '/test/case/test'))
-  test_suite.set_test_result_base_dir(os.path.abspath(options.project_dir + '/test/case/result'))
-  test_suite.set_test_result_tmp_dir(os.path.abspath(options.work_dir + '/result_output'))
+  test_suite.set_test_case_base_dir(os.path.join(options.project_dir, 'test', 'case', 'test'))
+  test_suite.set_test_result_base_dir(os.path.join(options.project_dir, 'test', 'case', 'result'))
+  test_suite.set_test_result_tmp_dir(os.path.join(options.work_dir, 'result_output'))
 
   test_suite.set_server_port(options.server_port)
   test_suite.set_use_unix_socket(not options.not_use_unix_socket)
   test_suite.set_db_server_base_dir(__get_build_path(options.work_dir))
-  test_suite.set_db_data_dir(options.work_dir + '/data')
+  test_suite.set_db_data_dir(os.path.join(options.project_dir, 'data'))
   test_suite.set_db_config(os.path.abspath(options.project_dir + '/etc/observer.ini'))
 
   if options.test_cases is not None:
@@ -936,16 +981,18 @@ def __init_test_suite_with_source_code(options, eval_result):
   proj_path = os.path.abspath(options.project_dir)
   build_path = __get_build_path(options.work_dir)
 
-  if not compile(proj_path, build_path, 
-                 options.compile_cmake_args, 
-                 options.compile_make_args, 
-                 options.compile_rebuild, 
-                 eval_result):
-    message = "Failed to compile source code"
-    _logger.error(message)
-    return None
-
-  _logger.info("compile source code done")
+  if not options.skip_compile:
+    if not compile(proj_path, build_path,
+                   options.compile_cmake_args,
+                   options.compile_make_args,
+                   options.compile_rebuild,
+                   eval_result):
+      message = "Failed to compile source code"
+      _logger.error(message)
+      return None
+    _logger.info("compile source code done")
+  else:
+    _logger.info("skip compile, use existing binary")
 
   # 覆盖一些测试的路径
   _logger.info("some config will be override if exists")

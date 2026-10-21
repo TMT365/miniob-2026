@@ -16,8 +16,6 @@ See the Mulan PSL v2 for more details. */
 
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <vector>
-#include <filesystem>
 
 #include "common/lang/string.h"
 #include "common/log/log.h"
@@ -29,6 +27,8 @@ See the Mulan PSL v2 for more details. */
 #include "storage/trx/trx.h"
 #include "storage/clog/disk_log_handler.h"
 #include "storage/clog/integrated_log_replayer.h"
+#include "src/common/lang/vector.h"
+#include "storage/index/index.h"
 
 using namespace common;
 
@@ -44,10 +44,14 @@ Db::~Db()
     log_handler_->await_termination();
     log_handler_.reset();
   }
+  if (lsm_) {
+    delete lsm_;
+    lsm_ = nullptr;
+  }
   LOG_INFO("Db has been closed: %s", name_.c_str());
 }
 
-RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, const char *log_handler_name)
+RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, const char *log_handler_name, const char *storage_engine)
 {
   RC rc = RC::SUCCESS;
 
@@ -61,13 +65,25 @@ RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, cons
     return RC::INVALID_ARGUMENT;
   }
 
-  TrxKit *trx_kit = TrxKit::create(trx_kit_name);
+  oceanbase::ObLsmOptions options;
+  filesystem::path lsm_path = filesystem::path(dbpath) / "lsm";
+  filesystem::create_directory(lsm_path);
+
+  rc = oceanbase::ObLsm::open(options, lsm_path, &lsm_);
+  if (OB_FAIL(rc)) {
+    LOG_ERROR("failed to open lsm. dbpath=%s, rc=%s", dbpath, strrc(rc));
+    return rc;
+  }
+
+  TrxKit *trx_kit = TrxKit::create(trx_kit_name, this);
   if (trx_kit == nullptr) {
     LOG_ERROR("Failed to create trx kit: %s", trx_kit_name);
     return RC::INVALID_ARGUMENT;
   }
 
   trx_kit_.reset(trx_kit);
+
+  storage_engine_ = storage_engine;
 
   buffer_pool_manager_ = make_unique<BufferPoolManager>();
   auto dblwr_buffer    = make_unique<DiskDoubleWriteBuffer>(*buffer_pool_manager_);
@@ -136,7 +152,7 @@ RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, cons
   return rc;
 }
 
-RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attributes, const StorageFormat storage_format)
+RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attributes, const vector<string>& primary_keys, const StorageFormat storage_format)
 {
   RC rc = RC::SUCCESS;
   // check table_name
@@ -149,7 +165,8 @@ RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attribut
   string  table_file_path = table_meta_file(path_.c_str(), table_name);
   Table  *table           = new Table();
   int32_t table_id        = next_table_id_++;
-  rc = table->create(this, table_id, table_file_path.c_str(), table_name, path_.c_str(), attributes, storage_format);
+  rc = table->create(this, table_id, table_file_path.c_str(), table_name, path_.c_str(), attributes, primary_keys, storage_format,
+                     get_storage_engine());
   if (rc != RC::SUCCESS) {
     LOG_ERROR("Failed to create table %s.", table_name);
     delete table;
@@ -160,6 +177,45 @@ RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attribut
   LOG_INFO("Create table success. table name=%s, table_id:%d", table_name, table_id);
   return RC::SUCCESS;
 }
+
+RC Db::drop_table(const char *table_name)
+{
+  auto it = opened_tables_.find(table_name);
+  if (it == opened_tables_.end()) {
+    LOG_WARN("Table not found: %s", table_name);
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+  Table *table = it->second;
+
+  vector<string> files_to_remove;
+  files_to_remove.push_back(table_meta_file(path_.c_str(), table_name));
+  files_to_remove.push_back(table_data_file(path_.c_str(), table_name));
+  files_to_remove.push_back(table_lob_file(path_.c_str(), table_name));
+
+  vector<Index *> indexes;
+  table->find_all_index(indexes);
+  for (Index *index : indexes) {
+    files_to_remove.push_back(table_index_file(path_.c_str(), table_name, index->index_meta().name()));
+  }
+
+  for (const string &file_path : files_to_remove) {
+    if (filesystem::exists(file_path)) {
+      if (::remove(file_path.c_str()) != 0) {
+        LOG_ERROR("Failed to remove file: %s, errno=%d:%s", file_path.c_str(), errno, strerror(errno));
+        return RC::IOERR_CLOSE;
+      }
+    }
+  }
+
+  // 索引对象由 Table 析构链自动清理，不要在这里 delete
+  opened_tables_.erase(it);
+  delete table;
+
+
+  LOG_INFO("Drop table success. table name=%s", table_name);
+  return RC::SUCCESS;
+}
+
 
 Table *Db::find_table(const char *table_name) const
 {
@@ -358,7 +414,7 @@ RC Db::flush_meta()
     return RC::IOERR_WRITE;
   }
 
-  string buffer = std::to_string(check_point_lsn_);
+  string buffer = to_string(check_point_lsn_);
   int    n      = write(fd, buffer.c_str(), buffer.size());
   if (n < 0) {
     LOG_ERROR("Failed to write db meta file. db=%s, file=%s, errno=%s", 

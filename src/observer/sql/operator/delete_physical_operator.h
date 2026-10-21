@@ -32,6 +32,8 @@ public:
 
   PhysicalOperatorType type() const override { return PhysicalOperatorType::DELETE; }
 
+  OpType get_op_type() const override { return OpType::DELETE; }
+
   RC open(Trx *trx) override;
   RC next() override;
   RC close() override;
@@ -39,7 +41,7 @@ public:
   Tuple *current_tuple() override { return nullptr; }
 
 private:
-  Table              *table_ = nullptr;
-  Trx                *trx_   = nullptr;
-  std::vector<Record> records_;
+  Table         *table_ = nullptr;
+  Trx           *trx_   = nullptr;
+  vector<Record> records_;
 };

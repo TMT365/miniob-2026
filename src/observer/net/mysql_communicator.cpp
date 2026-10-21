@@ -13,7 +13,6 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include <string.h>
-#include <vector>
 
 #include "common/io/io.h"
 #include "common/log/log.h"
@@ -758,7 +757,7 @@ RC MysqlCommunicator::write_result(SessionEvent *event, bool &need_disconnect)
 
     // send result set
     // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query_response_text_resultset.html
-    RC rc = sql_result->open();
+    rc = sql_result->open();
     if (rc != RC::SUCCESS) {
       sql_result->set_return_code(rc);
       return write_state(event, need_disconnect);

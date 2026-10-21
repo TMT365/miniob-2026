@@ -27,6 +27,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/record/record.h"
 #include "storage/trx/mvcc_trx.h"
 #include "common/thread/thread_pool_executor.h"
+#include "storage/record/heap_record_scanner.h"
 
 using namespace std;
 using namespace common;
@@ -72,7 +73,7 @@ TEST(MvccTrxLog, wal)
   }
 
   for (const string &table_name : table_names) {
-    ASSERT_EQ(RC::SUCCESS, db->create_table(table_name.c_str(), attr_infos));
+    ASSERT_EQ(RC::SUCCESS, db->create_table(table_name.c_str(), attr_infos, {}));
     ASSERT_EQ(RC::SUCCESS, db->sync());
   }
 
@@ -135,14 +136,16 @@ TEST(MvccTrxLog, wal)
     Table *table2 = db2->find_table(table_name.c_str());
     ASSERT_NE(table2, nullptr);
 
-    RecordFileScanner scanner2;
+    RecordScanner *scanner2 = nullptr;
     ASSERT_EQ(RC::SUCCESS, table2->get_record_scanner(scanner2, nullptr, ReadWriteMode::READ_ONLY));
     int    count2 = 0;
     RC     rc     = RC::SUCCESS;
     Record record;
-    while (OB_SUCC(rc = scanner2.next(record))) {
+    while (OB_SUCC(rc = scanner2->next(record))) {
       count2++;
     }
+    delete scanner2;
+    scanner2 = nullptr;
 
     ASSERT_EQ(insert_num, count2);
   }
@@ -193,7 +196,7 @@ TEST(MvccTrxLog, wal2)
   }
 
   for (const string &table_name : table_names) {
-    ASSERT_EQ(RC::SUCCESS, db->create_table(table_name.c_str(), attr_infos));
+    ASSERT_EQ(RC::SUCCESS, db->create_table(table_name.c_str(), attr_infos, {}));
     ASSERT_EQ(RC::SUCCESS, db->sync());
   }
 
@@ -245,7 +248,7 @@ TEST(MvccTrxLog, wal2)
   for (int i = table_num; i < table_num + table_num2; i++) {
     string table_name = "table_" + to_string(i);
     table_names_part2.push_back(table_name);
-    ASSERT_EQ(RC::SUCCESS, db->create_table(table_name.c_str(), attr_infos));
+    ASSERT_EQ(RC::SUCCESS, db->create_table(table_name.c_str(), attr_infos, {}));
     ASSERT_EQ(RC::SUCCESS, db->sync());
   }
 
@@ -304,14 +307,16 @@ TEST(MvccTrxLog, wal2)
     Table *table2 = db2->find_table(table_name.c_str());
     ASSERT_NE(table2, nullptr);
 
-    RecordFileScanner scanner2;
+    RecordScanner* scanner2;
     ASSERT_EQ(RC::SUCCESS, table2->get_record_scanner(scanner2, nullptr, ReadWriteMode::READ_ONLY));
     int    count2 = 0;
     RC     rc     = RC::SUCCESS;
     Record record;
-    while (OB_SUCC(rc = scanner2.next(record))) {
+    while (OB_SUCC(rc = scanner2->next(record))) {
       count2++;
     }
+    delete scanner2;
+    scanner2 = nullptr;
 
     ASSERT_EQ(insert_num + insert_num2, count2);
   }
@@ -321,14 +326,16 @@ TEST(MvccTrxLog, wal2)
     Table *table2 = db2->find_table(table_name.c_str());
     ASSERT_NE(table2, nullptr);
 
-    RecordFileScanner scanner2;
+    RecordScanner* scanner2;
     ASSERT_EQ(RC::SUCCESS, table2->get_record_scanner(scanner2, nullptr, ReadWriteMode::READ_ONLY));
     int    count2 = 0;
     RC     rc     = RC::SUCCESS;
     Record record;
-    while (OB_SUCC(rc = scanner2.next(record))) {
+    while (OB_SUCC(rc = scanner2->next(record))) {
       count2++;
     }
+    delete scanner2;
+    scanner2 = nullptr;
 
     ASSERT_EQ(insert_num2, count2);
   }
@@ -378,7 +385,7 @@ TEST(MvccTrxLog, wal_rollback)
   }
 
   for (const string &table_name : table_names) {
-    ASSERT_EQ(RC::SUCCESS, db->create_table(table_name.c_str(), attr_infos));
+    ASSERT_EQ(RC::SUCCESS, db->create_table(table_name.c_str(), attr_infos, {}));
     ASSERT_EQ(RC::SUCCESS, db->sync());
   }
 
@@ -442,16 +449,18 @@ TEST(MvccTrxLog, wal_rollback)
     Table *table2 = db2->find_table(table_name.c_str());
     ASSERT_NE(table2, nullptr);
 
-    RecordFileScanner scanner2;
+    RecordScanner* scanner2;
     ASSERT_EQ(RC::SUCCESS, table2->get_record_scanner(scanner2, nullptr, ReadWriteMode::READ_ONLY));
     int    visible_count = 0;
     Record record;
     RC     rc = RC::SUCCESS;
-    while (OB_SUCC(rc = scanner2.next(record))) {
+    while (OB_SUCC(rc = scanner2->next(record))) {
       if (OB_SUCC(trx->visit_record(table2, record, ReadWriteMode::READ_ONLY))) {
         visible_count++;
       }
     }
+    delete scanner2;
+    scanner2 = nullptr;
 
     ASSERT_EQ(0, visible_count);
   }
@@ -502,7 +511,7 @@ TEST(MvccTrxLog, wal_rollback_half)
   }
 
   for (const string &table_name : table_names) {
-    ASSERT_EQ(RC::SUCCESS, db->create_table(table_name.c_str(), attr_infos));
+    ASSERT_EQ(RC::SUCCESS, db->create_table(table_name.c_str(), attr_infos, {}));
     ASSERT_EQ(RC::SUCCESS, db->sync());
   }
 
@@ -570,16 +579,18 @@ TEST(MvccTrxLog, wal_rollback_half)
     Table *table2 = db2->find_table(table_name.c_str());
     ASSERT_NE(table2, nullptr);
 
-    RecordFileScanner scanner2;
+    RecordScanner* scanner2;
     ASSERT_EQ(RC::SUCCESS, table2->get_record_scanner(scanner2, nullptr, ReadWriteMode::READ_ONLY));
     int    visible_count = 0;
     Record record;
     RC     rc = RC::SUCCESS;
-    while (OB_SUCC(rc = scanner2.next(record))) {
+    while (OB_SUCC(rc = scanner2->next(record))) {
       if (OB_SUCC(trx->visit_record(table2, record, ReadWriteMode::READ_ONLY))) {
         visible_count++;
       }
     }
+    delete scanner2;
+    scanner2 = nullptr;
 
     // ASSERT_EQ(insert_num, count);
     ASSERT_EQ(insert_num / 2, visible_count);
@@ -631,7 +642,7 @@ TEST(MvccTrxLog, wal_rollback_abnormal)
   }
 
   for (const string &table_name : table_names) {
-    ASSERT_EQ(RC::SUCCESS, db->create_table(table_name.c_str(), attr_infos));
+    ASSERT_EQ(RC::SUCCESS, db->create_table(table_name.c_str(), attr_infos, {}));
     ASSERT_EQ(RC::SUCCESS, db->sync());
   }
 
@@ -697,16 +708,18 @@ TEST(MvccTrxLog, wal_rollback_abnormal)
     Table *table2 = db2->find_table(table_name.c_str());
     ASSERT_NE(table2, nullptr);
 
-    RecordFileScanner scanner2;
+    RecordScanner* scanner2;
     ASSERT_EQ(RC::SUCCESS, table2->get_record_scanner(scanner2, nullptr, ReadWriteMode::READ_ONLY));
     int    visible_count = 0;
     Record record;
     RC     rc = RC::SUCCESS;
-    while (OB_SUCC(rc = scanner2.next(record))) {
+    while (OB_SUCC(rc = scanner2->next(record))) {
       if (OB_SUCC(trx->visit_record(table2, record, ReadWriteMode::READ_ONLY))) {
         visible_count++;
       }
     }
+    delete scanner2;
+    scanner2 = nullptr;
 
     ASSERT_EQ(visible_count, insert_num / 2);
   }

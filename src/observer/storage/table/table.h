@@ -15,6 +15,9 @@ See the Mulan PSL v2 for more details. */
 #pragma once
 
 #include "storage/table/table_meta.h"
+#include "storage/table/table_engine.h"
+#include "storage/common/chunk.h"
+#include "storage/record/lob_handler.h"
 #include "common/types.h"
 #include "common/lang/span.h"
 #include "common/lang/functional.h"
@@ -23,7 +26,7 @@ struct RID;
 class Record;
 class DiskBufferPool;
 class RecordFileHandler;
-class RecordFileScanner;
+class RecordScanner;
 class ChunkFileScanner;
 class ConditionFilter;
 class DefaultConditionFilter;
@@ -32,9 +35,10 @@ class IndexScanner;
 class RecordDeleter;
 class Trx;
 class Db;
+class Field;
 
 /**
- * @brief 表
+ * @brief 表, 定义了所有关于表的操作 DDL + DML
  *
  */
 class Table
@@ -43,17 +47,27 @@ public:
   Table() = default;
   ~Table();
 
+  // TODO: use TableEngine replace Table
+  friend class TableEngine;
+  friend class HeapTableEngine;
+
   /**
-   * 创建一个表
-   * @param path 元数据保存的文件(完整路径)
+   * 创建一个表，数据的DDL语句执行时调用
+   * @param db 数据库对象
+   * @param table_id 表ID
+   * @param path 元数据保存的文件(完整路径) 【 .table 】
    * @param name 表名
-   * @param base_dir 表数据存放的路径
-   * @param attribute_count 字段个数
-   * @param attributes 字段
+   * @param base_dir 表数据存放的路径   【 .data 】
+   * @param attributes 字段定义列表
+   * @param primary_keys 主键字段名列表
+   * @param storage_format 存储格式
+   * @param storage_engine 存储引擎
    */
   RC create(Db *db, int32_t table_id, const char *path, const char *name, const char *base_dir,
-      span<const AttrInfoSqlNode> attributes, StorageFormat storage_format);
+      span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys, StorageFormat storage_format,
+      StorageEngine storage_engine);
 
+  RC drop_table(const char *table_name);
   /**
    * 打开一个表
    * @param meta_file 保存表元数据的文件完整路径
@@ -70,26 +84,60 @@ public:
    */
   RC make_record(int value_num, const Value *values, Record &record);
 
+  // 重载
+  RC make_record(const Record &old_record, Record &new_record, Field *field, const Value *value);
+
+  // 新增：只复制旧记录到新记录，不修改任何字段
+  RC make_record(const Record &old_record, Record &new_record);
+
+  // 新增：多字段更新时，从旧记录创建新记录并设置多个字段的值
+  // @param old_record 旧记录
+  // @param new_record OUT: 新记录
+  // @param fields 要更新的字段数组
+  // @param values 对应的值数组
+  // @param value_num 字段数量
+  RC make_record(const Record &old_record, Record &new_record, const vector<Field *> &fields, const vector<Value> &values, int value_num);
+
   /**
    * @brief 在当前的表中插入一条记录
    * @details 在表文件和索引中插入关联数据。这里只管在表中插入数据，不关心事务相关操作。
    * @param record[in/out] 传入的数据包含具体的数据，插入成功会通过此字段返回RID
    */
   RC insert_record(Record &record);
+
+  RC insert_chunk(const Chunk &chunk);
+
   RC delete_record(const Record &record);
-  RC delete_record(const RID &rid);
+
+   /**
+   * 更新时，先复制旧记录的内容到新记录中，然后修改新记录的内容，最后调用此方法更新表和索引中的数据
+   * @param old_record 旧记录
+   * @param new_record 新记录
+   * @param field 要更新的字段
+   * @param value 要更新的字段的值
+   * @return RC
+   */
+  RC update_record(const Record &old_record, Record &new_record,Field *field, const Value *value);
+
+  RC insert_record_with_trx(Record &record, Trx *trx);
+  RC delete_record_with_trx(const Record &record, Trx *trx);
+  /**
+  * 更新时，先复制旧记录的内容到新记录中，然后修改新记录的内容，最后调用此方法更新表和索引中的数据。不直接修改旧记录的内容。是为了
+  * 保证在事务中，旧记录的内容不会被修改，其他事务可以继续访问旧记录的内容。
+  * @param old_record 旧记录
+  * @param new_record 新记录
+  * @return RC
+  */
+  RC update_record_with_trx(const Record &old_record, const Record &new_record, Trx *trx);
+
   RC get_record(const RID &rid, Record &record);
 
-  RC recover_insert_record(Record &record);
-
   // TODO refactor
-  RC create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name);
+  RC create_index(Trx *trx, const vector<FieldMeta> &field_metas, const char *index_name, const IndexType &index_type);
 
-  RC get_record_scanner(RecordFileScanner &scanner, Trx *trx, ReadWriteMode mode);
+  RC get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWriteMode mode);
 
   RC get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadWriteMode mode);
-
-  RecordFileHandler *record_handler() const { return record_handler_; }
 
   /**
    * @brief 可以在页面锁保护的情况下访问记录
@@ -100,7 +148,6 @@ public:
    */
   RC visit_record(const RID &rid, function<bool(Record &)> visitor);
 
-public:
   int32_t     table_id() const { return table_meta_.table_id(); }
   const char *name() const;
 
@@ -108,25 +155,25 @@ public:
 
   const TableMeta &table_meta() const;
 
+  LobFileHandler *lob_handler() const { return lob_handler_; }
+
   RC sync();
 
-private:
-  RC insert_entry_of_indexes(const char *record, const RID &rid);
-  RC delete_entry_of_indexes(const char *record, const RID &rid, bool error_on_not_exists);
-  RC set_value_to_record(char *record_data, const Value &value, const FieldMeta *field);
-
-private:
-  RC init_record_handler(const char *base_dir);
-
-public:
   Index *find_index(const char *index_name) const;
   Index *find_index_by_field(const char *field_name) const;
 
+  RC find_all_index(vector<Index *> &indexes) const;
+  RC find_all_index_by_field_name(const char *field_name, vector<Index *> &out, IndexType *index_type = nullptr) const;
+
 private:
-  Db                *db_ = nullptr;
-  string             base_dir_;
-  TableMeta          table_meta_;
-  DiskBufferPool    *data_buffer_pool_ = nullptr;  /// 数据文件关联的buffer pool
-  RecordFileHandler *record_handler_   = nullptr;  /// 记录操作
-  vector<Index *>    indexes_;
+  Db       *db_ = nullptr;
+  TableMeta table_meta_;
+  // DiskBufferPool    *data_buffer_pool_ = nullptr;  /// 数据文件关联的buffer pool
+  // RecordFileHandler *record_handler_   = nullptr;  /// 记录操作
+  // vector<Index *>    indexes_;
+  unique_ptr<TableEngine> engine_      = nullptr;
+  LobFileHandler         *lob_handler_ = nullptr;
+
+  // RC init_record_handler(const char *base_dir);
+  RC set_value_to_record(char *record_data, const Value &value, const FieldMeta *field);
 };

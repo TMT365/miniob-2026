@@ -14,7 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include "common/rc.h"
+#include "common/sys/rc.h"
 #include "common/lang/vector.h"
 #include "common/lang/string.h"
 #include "common/lang/unordered_map.h"
@@ -24,6 +24,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/buffer/disk_buffer_pool.h"
 #include "storage/clog/disk_log_handler.h"
 #include "storage/buffer/double_write_buffer.h"
+#include "oblsm/include/ob_lsm.h"
 
 class Table;
 class LogHandler;
@@ -53,9 +54,12 @@ public:
    * @param name   数据库名称
    * @param dbpath 当前数据库放在哪个目录下
    * @param trx_kit_name 使用哪种类型的事务模型
+   * @param storage_engine 存储引擎，目前只支持heap table 和 lsm-tree 两种
    * @note 数据库不是放在dbpath/name下，是直接使用dbpath目录
+   * @todo 支持多个 db，例如同一个db 都是相同的存储引擎。可参考 duckdb。
    */
-  RC init(const char *name, const char *dbpath, const char *trx_kit_name, const char *log_handler_name);
+  RC init(const char *name, const char *dbpath, const char *trx_kit_name, const char *log_handler_name,
+      const char *storage_engine = "heap");
 
   /**
    * @brief 创建一个表
@@ -63,8 +67,14 @@ public:
    * @param attributes 表的属性
    * @param storage_format 表的存储格式
    */
-  RC create_table(const char *table_name, span<const AttrInfoSqlNode> attributes,
+  RC create_table(const char *table_name, span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys,
       const StorageFormat storage_format = StorageFormat::ROW_FORMAT);
+
+  /**
+ * @brief 删除一个表
+ * @param table_name 表名
+ */
+  RC drop_table(const char *table_name);
 
   /**
    * @brief 根据表名查找表
@@ -96,6 +106,10 @@ public:
   /// @brief 获取当前数据库的事务管理器
   TrxKit &trx_kit();
 
+  string path() const { return path_; }
+
+  oceanbase::ObLsm *lsm() { return lsm_; }
+
 private:
   /// @brief 打开所有的表。在数据库初始化的时候会执行
   RC open_all_tables();
@@ -110,6 +124,21 @@ private:
   /// @brief 初始化数据库的double buffer pool
   RC init_dblwr_buffer();
 
+  StorageEngine get_storage_engine()
+  {
+    StorageEngine engine = StorageEngine::UNKNOWN_ENGINE;
+    if (storage_engine_.length() == 0) {
+      engine = StorageEngine::HEAP;
+    } else if (0 == strcasecmp(storage_engine_.c_str(), "heap")) {
+      engine = StorageEngine::HEAP;
+    } else if (0 == strcasecmp(storage_engine_.c_str(), "lsm")) {
+      engine = StorageEngine::LSM;
+    } else {
+      engine = StorageEngine::UNKNOWN_ENGINE;
+    }
+    return engine;
+  }
+
 private:
   string                         name_;                 ///< 数据库名称
   string                         path_;                 ///< 数据库文件存放的目录
@@ -117,9 +146,11 @@ private:
   unique_ptr<BufferPoolManager>  buffer_pool_manager_;  ///< 当前数据库的buffer pool管理器
   unique_ptr<LogHandler>         log_handler_;          ///< 当前数据库的日志处理器
   unique_ptr<TrxKit>             trx_kit_;              ///< 当前数据库的事务管理器
+  oceanbase::ObLsm              *lsm_;                  ///< 当前数据库的 LSM-Tree 存储引擎
 
   /// 给每个table都分配一个ID，用来记录日志。这里假设所有的DDL都不会并发操作，所以相关的数据都不上锁
   int32_t next_table_id_ = 0;
 
-  LSN check_point_lsn_ = 0;  ///< 当前数据库的检查点LSN。会记录到磁盘中。
+  LSN    check_point_lsn_ = 0;  ///< 当前数据库的检查点LSN。会记录到磁盘中。
+  string storage_engine_;
 };

@@ -24,8 +24,11 @@ See the Mulan PSL v2 for more details. */
 class PredicateLogicalOperator : public LogicalOperator
 {
 public:
-  PredicateLogicalOperator(std::unique_ptr<Expression> expression);
+  PredicateLogicalOperator(unique_ptr<Expression> expression);
   virtual ~PredicateLogicalOperator() = default;
 
   LogicalOperatorType type() const override { return LogicalOperatorType::PREDICATE; }
+
+  OpType get_op_type() const override { return OpType::LOGICALFILTER; }
+
 };

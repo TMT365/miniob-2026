@@ -14,7 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include "common/rc.h"
+#include "common/sys/rc.h"
 #include "sql/stmt/stmt.h"
 
 class Table;
@@ -32,10 +32,8 @@ public:
 
   StmtType type() const override { return StmtType::INSERT; }
 
-public:
   static RC create(Db *db, const InsertSqlNode &insert_sql, Stmt *&stmt);
 
-public:
   Table       *table() const { return table_; }
   const Value *values() const { return values_; }
   int          value_amount() const { return value_amount_; }

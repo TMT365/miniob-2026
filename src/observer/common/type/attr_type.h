@@ -21,9 +21,13 @@ enum class AttrType
   INTS,      ///< 整数类型(4字节)
   FLOATS,    ///< 浮点数类型(4字节)
   VECTORS,   ///< 向量类型
+  DATES,    ///< date 类型
+  NULL_VALS,  ///< null 类型
   BOOLEANS,  ///< boolean类型，当前不是由parser解析出来的，是程序内部使用的
   MAXTYPE,   ///< 请在 UNDEFINED 与 MAXTYPE 之间增加新类型
 };
 
 const char *attr_type_to_string(AttrType type);
 AttrType    attr_type_from_string(const char *s);
+bool        is_numerical_type(AttrType type);
+bool        is_string_type(AttrType type);

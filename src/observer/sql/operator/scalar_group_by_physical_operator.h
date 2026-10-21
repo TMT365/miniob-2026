@@ -23,10 +23,11 @@ See the Mulan PSL v2 for more details. */
 class ScalarGroupByPhysicalOperator : public GroupByPhysicalOperator
 {
 public:
-  ScalarGroupByPhysicalOperator(std::vector<Expression *> &&expressions);
+  ScalarGroupByPhysicalOperator(vector<Expression *> &&expressions);
   virtual ~ScalarGroupByPhysicalOperator() = default;
 
   PhysicalOperatorType type() const override { return PhysicalOperatorType::SCALAR_GROUP_BY; }
+  OpType               get_op_type() const override { return OpType::SCALARGROUPBY; }
 
   RC open(Trx *trx) override;
   RC next() override;
@@ -35,6 +36,6 @@ public:
   Tuple *current_tuple() override;
 
 private:
-  std::unique_ptr<GroupValueType> group_value_;
-  bool                            emitted_ = false;  /// 标识是否已经输出过
+  unique_ptr<GroupValueType> group_value_;
+  bool                       emitted_ = false;  /// 标识是否已经输出过
 };

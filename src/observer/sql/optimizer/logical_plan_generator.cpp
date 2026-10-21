@@ -14,7 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "sql/optimizer/logical_plan_generator.h"
 
-#include <common/log/log.h>
+#include "common/log/log.h"
 
 #include "sql/operator/calc_logical_operator.h"
 #include "sql/operator/delete_logical_operator.h"
@@ -26,6 +26,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/project_logical_operator.h"
 #include "sql/operator/table_get_logical_operator.h"
 #include "sql/operator/group_by_logical_operator.h"
+#include "sql/operator/update_logical_operator.h"
 
 #include "sql/stmt/calc_stmt.h"
 #include "sql/stmt/delete_stmt.h"
@@ -33,6 +34,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/filter_stmt.h"
 #include "sql/stmt/insert_stmt.h"
 #include "sql/stmt/select_stmt.h"
+#include "sql/stmt/update_stmt.h"
 #include "sql/stmt/stmt.h"
 
 #include "sql/expr/expression_iterator.h"
@@ -68,6 +70,12 @@ RC LogicalPlanGenerator::create(Stmt *stmt, unique_ptr<LogicalOperator> &logical
       rc = create_plan(delete_stmt, logical_operator);
     } break;
 
+    case StmtType::UPDATE: {
+      UpdateStmt *update_stmt = static_cast<UpdateStmt *>(stmt);
+
+      rc = create_plan(update_stmt, logical_operator);
+    } break;
+
     case StmtType::EXPLAIN: {
       ExplainStmt *explain_stmt = static_cast<ExplainStmt *>(stmt);
 
@@ -80,49 +88,96 @@ RC LogicalPlanGenerator::create(Stmt *stmt, unique_ptr<LogicalOperator> &logical
   return rc;
 }
 
-RC LogicalPlanGenerator::create_plan(CalcStmt *calc_stmt, std::unique_ptr<LogicalOperator> &logical_operator)
+RC LogicalPlanGenerator::create_plan(CalcStmt *calc_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
   logical_operator.reset(new CalcLogicalOperator(std::move(calc_stmt->expressions())));
   return RC::SUCCESS;
 }
 
+RC LogicalPlanGenerator::create_join_on_pred_oper(
+    SelectStmt *select_stmt, JoinSqlNode *join, unique_ptr<LogicalOperator> &join_on_pred_oper)
+{
+  // 递归产生逻辑计划
+  RC rc = RC::SUCCESS;
+  if (join->type == TableRefType::BASE_TABLE) {
+    // TableGetLogicalOperator 要从表里面那记录了
+    // 从JoinSqlNode 节点里面获取表名
+    auto iter = select_stmt->table_map().find(join->table_name);
+    if (iter == select_stmt->table_map().end()) {
+      LOG_WARN("table %s not found", join->table_name.c_str());
+      return RC::SCHEMA_TABLE_NOT_EXIST;
+    }
+    Table *table = iter->second;
+    if (table) {
+      // 创建 TableGetLogicalOperator
+      join_on_pred_oper = make_unique<TableGetLogicalOperator>(table, ReadWriteMode::READ_ONLY);
+      return RC::SUCCESS;
+    }
+  } else if (join->type == TableRefType::JOIN_NODE) {
+    unique_ptr<LogicalOperator> left_op;
+    rc = create_join_on_pred_oper(select_stmt, join->left.get(), left_op);
+    if (OB_FAIL(rc))
+      return rc;
+
+    unique_ptr<LogicalOperator> right_op;
+    rc = create_join_on_pred_oper(select_stmt, join->right.get(), right_op);
+    if (OB_FAIL(rc))
+      return rc;
+
+    auto join_op = make_unique<JoinLogicalOperator>();
+    join_op->add_child(std::move(left_op));
+    join_op->add_child(std::move(right_op));
+    join_op->set_join_type(join->join_type);
+
+    // 直接使用已经构造好的 FilterStmt
+    // join->join_type == JoinType::INNER_JOIN &&
+    if (join->on_filter_stmt != nullptr) {
+      unique_ptr<LogicalOperator> on_pred_oper;
+      rc = create_plan(join->on_filter_stmt, on_pred_oper);
+      if (OB_FAIL(rc)) {
+        LOG_WARN("create join on predicate logical plan failed");
+        return rc;
+      }
+      join_op->set_on_predicate(std::move(on_pred_oper));
+    }
+    join_on_pred_oper = std::move(join_op);
+    return RC::SUCCESS;
+  }
+  return RC::UNIMPLEMENTED;
+}
+
 RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
   unique_ptr<LogicalOperator> *last_oper = nullptr;
+  unique_ptr<LogicalOperator>  join_on_pred_oper(nullptr);
+  last_oper = &join_on_pred_oper;
 
-  unique_ptr<LogicalOperator> table_oper(nullptr);
-  last_oper = &table_oper;
-
-  const std::vector<Table *> &tables = select_stmt->tables();
-  for (Table *table : tables) {
-
-    unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_ONLY));
-    if (table_oper == nullptr) {
-      table_oper = std::move(table_get_oper);
-    } else {
-      JoinLogicalOperator *join_oper = new JoinLogicalOperator;
-      join_oper->add_child(std::move(table_oper));
-      join_oper->add_child(std::move(table_get_oper));
-      table_oper = unique_ptr<LogicalOperator>(join_oper);
-    }
-  }
-
-  unique_ptr<LogicalOperator> predicate_oper;
-
-  RC rc = create_plan(select_stmt->filter_stmt(), predicate_oper);
+  // ========== 1. 构建JOIN子树：递归生成TableGet / JoinLogicalOperator（内部自带ON条件） ==========
+  // create_join_on_filter_oper：生成完整的join树，ON条件挂载在Join算子内部
+  RC rc = create_join_on_pred_oper(select_stmt, select_stmt->join_sql_node(), join_on_pred_oper);
   if (OB_FAIL(rc)) {
-    LOG_WARN("failed to create predicate logical plan. rc=%s", strrc(rc));
+    LOG_WARN("create from join sql node plan failed, rc=%s", strrc(rc));
     return rc;
   }
 
-  if (predicate_oper) {
-    if (*last_oper) {
-      predicate_oper->add_child(std::move(*last_oper));
+  // ========== 2. WHERE 过滤算子（在JOIN结果之上） ==========
+  unique_ptr<LogicalOperator> where_pred_oper;
+  if (select_stmt->where_filter_stmt() != nullptr) {
+    rc = create_plan(select_stmt->where_filter_stmt(), where_pred_oper);
+    if (OB_FAIL(rc)) {
+      LOG_WARN("failed to create where predicate logical plan. rc=%s", strrc(rc));
+      return rc;
     }
-
-    last_oper = &predicate_oper;
   }
 
+  if (where_pred_oper) {
+    if (*last_oper) {
+      where_pred_oper->add_child(std::move(*last_oper));
+    }
+    last_oper = &where_pred_oper;
+  }
+
+  // ========== 3. GROUP BY 分组 ==========
   unique_ptr<LogicalOperator> group_by_oper;
   rc = create_group_by_plan(select_stmt, group_by_oper);
   if (OB_FAIL(rc)) {
@@ -134,82 +189,56 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     if (*last_oper) {
       group_by_oper->add_child(std::move(*last_oper));
     }
-
     last_oper = &group_by_oper;
   }
 
-  auto project_oper = make_unique<ProjectLogicalOperator>(std::move(select_stmt->query_expressions()));
+  // ========== 4. Project投影 ==========
+  unique_ptr<LogicalOperator> project_oper = make_unique<ProjectLogicalOperator>(std::move(select_stmt->query_expressions()));
   if (*last_oper) {
     project_oper->add_child(std::move(*last_oper));
   }
+  last_oper = &project_oper;
 
-  logical_operator = std::move(project_oper);
+  logical_operator = std::move(*last_oper);
   return RC::SUCCESS;
 }
 
 RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
   RC                                  rc = RC::SUCCESS;
-  std::vector<unique_ptr<Expression>> cmp_exprs;
-  const std::vector<FilterUnit *>    &filter_units = filter_stmt->filter_units();
+  vector<unique_ptr<Expression>> cmp_exprs;
+  const vector<FilterUnit *>    &filter_units = filter_stmt->filter_units();
+  // NOTE 现在的循环只能支持AND这种扁平的where语句, 想要支持OR等需要使用树形结构，采用递归处理
   for (const FilterUnit *filter_unit : filter_units) {
     const FilterObj &filter_obj_left  = filter_unit->left();
     const FilterObj &filter_obj_right = filter_unit->right();
-
+    // NOTE 从这里把原来conditionSqlNode里面的filterUnit变成expression
+    /* 现在的 FilterObj 支持3种类型：字段，常量、复杂的表达式(Arithmetic = ValueExpr + FieldExpr)
+     *
+     */
     unique_ptr<Expression> left(filter_obj_left.is_attr
                                     ? static_cast<Expression *>(new FieldExpr(filter_obj_left.field))
-                                    : static_cast<Expression *>(new ValueExpr(filter_obj_left.value)));
+                                    : filter_obj_left.is_expr ? filter_obj_left.expr->copy().release()
+                                  : static_cast<Expression *>(new ValueExpr(filter_obj_left.value)));  // Value
 
     unique_ptr<Expression> right(filter_obj_right.is_attr
-                                     ? static_cast<Expression *>(new FieldExpr(filter_obj_right.field))
-                                     : static_cast<Expression *>(new ValueExpr(filter_obj_right.value)));
+                                    ? static_cast<Expression *>(new FieldExpr(filter_obj_right.field))
+        : filter_obj_right.is_expr ? filter_obj_right.expr->copy().release()
+                                   : static_cast<Expression *>(new ValueExpr(filter_obj_right.value)));  // Value
 
-    if (left->value_type() != right->value_type()) {
-      auto left_to_right_cost = implicit_cast_cost(left->value_type(), right->value_type());
-      auto right_to_left_cost = implicit_cast_cost(right->value_type(), left->value_type());
-      if (left_to_right_cost <= right_to_left_cost && left_to_right_cost != INT32_MAX) {
-        ExprType left_type = left->type();
-        auto cast_expr = make_unique<CastExpr>(std::move(left), right->value_type());
-        if (left_type == ExprType::VALUE) {
-          Value left_val;
-          if (OB_FAIL(rc = cast_expr->try_get_value(left_val)))
-          {
-            LOG_WARN("failed to get value from left child", strrc(rc));
-            return rc;
-          }
-          left = make_unique<ValueExpr>(left_val);
-        } else {
-          left = std::move(cast_expr);
-        }
-      } else if (right_to_left_cost < left_to_right_cost && right_to_left_cost != INT32_MAX) {
-        ExprType right_type = right->type();
-        auto cast_expr = make_unique<CastExpr>(std::move(right), left->value_type());
-        if (right_type == ExprType::VALUE) {
-          Value right_val;
-          if (OB_FAIL(rc = cast_expr->try_get_value(right_val)))
-          {
-            LOG_WARN("failed to get value from right child", strrc(rc));
-            return rc;
-          }
-          right = make_unique<ValueExpr>(right_val);
-        } else {
-          right = std::move(cast_expr);
-        }
-
-      } else {
-        rc = RC::UNSUPPORTED;
-        LOG_WARN("unsupported cast from %s to %s", attr_type_to_string(left->value_type()), attr_type_to_string(right->value_type()));
-        return rc;
-      }
+    // 2. 递归做类型对齐
+    rc = align_expression_types(left, right);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to align expression types");
+      return rc;
     }
 
-    ComparisonExpr *cmp_expr = new ComparisonExpr(filter_unit->comp(), std::move(left), std::move(right));
-    cmp_exprs.emplace_back(cmp_expr);
+    cmp_exprs.emplace_back(std::make_unique<ComparisonExpr>(filter_unit->comp(), std::move(left), std::move(right)));
   }
 
   unique_ptr<PredicateLogicalOperator> predicate_oper;
   if (!cmp_exprs.empty()) {
-    unique_ptr<ConjunctionExpr> conjunction_expr(new ConjunctionExpr(ConjunctionExpr::Type::AND, cmp_exprs));
+    unique_ptr<ConjunctionExpr> conjunction_expr(new ConjunctionExpr(ConjunctionExpr::Type::AND_EXPR, cmp_exprs));
     predicate_oper = unique_ptr<PredicateLogicalOperator>(new PredicateLogicalOperator(std::move(conjunction_expr)));
   }
 
@@ -223,6 +252,100 @@ int LogicalPlanGenerator::implicit_cast_cost(AttrType from, AttrType to)
     return 0;
   }
   return DataType::type_instance(from)->cast_cost(to);
+}
+
+// 递归地把 left 和 right 两棵表达式树对齐类型
+// 策略：比较两棵树的根类型，选择 cast 代价小的方向，然后递归处理子节点
+RC LogicalPlanGenerator::align_expression_types(unique_ptr<Expression> &left, unique_ptr<Expression> &right)
+{
+  // 如果左是 Arithmetic，先递归对齐它的左右子节点与 right
+  if (left->type() == ExprType::ARITHMETIC) {
+    auto                  *left_arith = static_cast<ArithmeticExpr *>(left.get());
+    unique_ptr<Expression> ll(left_arith->left().release());
+    unique_ptr<Expression> lr;
+    if (left_arith->right()) {
+      lr.reset(left_arith->right().release());
+    }
+    // 先递归左子节点
+    RC rc = align_expression_types(ll, right);
+    if (rc != RC::SUCCESS)
+      return rc;
+    // 再递归右子节点
+    if (lr) {
+      rc = align_expression_types(lr, right);
+      if (rc != RC::SUCCESS)
+        return rc;
+    }
+    // 重建 Arithmetic 节点（子节点已对齐）
+    left.reset(new ArithmeticExpr(left_arith->arithmetic_type(), ll.release(), lr.release()));
+  }
+  // 【修复】else if，不会同时执行两个分支
+  else if (right->type() == ExprType::ARITHMETIC) {
+    auto                  *right_arith = static_cast<ArithmeticExpr *>(right.get());
+    unique_ptr<Expression> rl(right_arith->left().release());
+    unique_ptr<Expression> rr;
+    if (right_arith->right()) {
+      rr.reset(right_arith->right().release());
+    }
+    // 先递归左子节点
+    RC rc = align_expression_types(left, rl);
+    if (rc != RC::SUCCESS)
+      return rc;
+    // 再递归右子节点
+    if (rr) {
+      rc = align_expression_types(left, rr);
+      if (rc != RC::SUCCESS)
+        return rc;
+    }
+    // 重建 Arithmetic 节点（子节点已对齐）
+    right.reset(new ArithmeticExpr(right_arith->arithmetic_type(), rl.release(), rr.release()));
+  }
+
+  // 此时左右都不是 Arithmetic（或已经是重建后的），比较根类型
+  AttrType left_type  = left->value_type();
+  AttrType right_type = right->value_type();
+  if (left_type == right_type) {
+    return RC::SUCCESS;
+  }
+  // 如果有一边类型是NULL
+  if (left_type == AttrType::NULL_VALS || right_type == AttrType::NULL_VALS) return RC::SUCCESS;
+
+  // 类型不同，选择 cast 代价小的方向
+  auto left_to_right_cost = implicit_cast_cost(left_type, right_type);
+  auto right_to_left_cost = implicit_cast_cost(right_type, left_type);
+
+  if (left_to_right_cost <= right_to_left_cost && left_to_right_cost != INT32_MAX) {
+    auto cast_expr = make_unique<CastExpr>(std::move(left), right_type);
+    if (cast_expr->child()->type() == ExprType::VALUE) {
+      // 当字符串常量需要转换成日期时，提前检查日期是否合法。2017-2-29 转换失败后直接返回错误码，从而最终输出
+      // FAILURE，而不是继续执行到比较阶段 NOTE 如果后续要从FAILURE --> 空集合就注释这里的判断语句
+      Value cast_value;
+      RC    rc = cast_expr->try_get_value(cast_value);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to cast constant from %s to %s. rc=%s",
+            attr_type_to_string(left_type), attr_type_to_string(right_type), strrc(rc));
+        return rc;
+      }
+    }
+    left = std::move(cast_expr);
+  } else if (right_to_left_cost < left_to_right_cost && right_to_left_cost != INT32_MAX) {
+    auto cast_expr = make_unique<CastExpr>(std::move(right), left_type);
+    if (cast_expr->child()->type() == ExprType::VALUE) {
+      Value cast_value;
+      RC    rc = cast_expr->try_get_value(cast_value);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to cast constant from %s to %s. rc=%s",
+            attr_type_to_string(right_type), attr_type_to_string(left_type), strrc(rc));
+        return rc;
+      }
+    }
+    right = std::move(cast_expr);
+  } else {
+    LOG_WARN("unsupported cast from %s to %s",
+        attr_type_to_string(left_type), attr_type_to_string(right_type));
+    return RC::UNSUPPORTED;
+  }
+  return RC::SUCCESS;
 }
 
 RC LogicalPlanGenerator::create_plan(InsertStmt *insert_stmt, unique_ptr<LogicalOperator> &logical_operator)
@@ -261,6 +384,42 @@ RC LogicalPlanGenerator::create_plan(DeleteStmt *delete_stmt, unique_ptr<Logical
   return rc;
 }
 
+// TODO : 目前update语句支持更新多个个字段，后续可以扩展为多个表的更新
+RC LogicalPlanGenerator::create_plan(UpdateStmt *update_stmt, unique_ptr<LogicalOperator> &logical_operator)
+{
+  Table                      *table       = update_stmt->table();
+  FilterStmt                 *filter_stmt = update_stmt->filter_stmt();
+
+  unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_WRITE));
+
+  unique_ptr<LogicalOperator> predicate_oper;
+
+  // 创建过滤条件的逻辑计划
+  RC rc = create_plan(filter_stmt, predicate_oper);
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+  // 创建更新操作的逻辑计划
+  // 使用新的构造函数，传递提前求值的 values 和需要运行时求值的 exprs
+  unique_ptr<LogicalOperator> update_oper(new UpdateLogicalOperator(
+      table,
+      update_stmt->take_fields(),
+      update_stmt->take_values(),    // 转移所有权
+      update_stmt->take_exprs(),     // 转移所有权
+      update_stmt->value_amount(),
+      filter_stmt));
+
+  if (predicate_oper) {
+    predicate_oper->add_child(std::move(table_get_oper));
+    update_oper->add_child(std::move(predicate_oper));
+  } else {
+    update_oper->add_child(std::move(table_get_oper));
+  }
+
+  logical_operator = std::move(update_oper);
+  return rc;
+}
+
 RC LogicalPlanGenerator::create_plan(ExplainStmt *explain_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
   unique_ptr<LogicalOperator> child_oper;
@@ -283,7 +442,8 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
   vector<unique_ptr<Expression>> &group_by_expressions = select_stmt->group_by();
   vector<Expression *> aggregate_expressions;
   vector<unique_ptr<Expression>> &query_expressions = select_stmt->query_expressions();
-  function<RC(std::unique_ptr<Expression>&)> collector = [&](unique_ptr<Expression> &expr) -> RC {
+  // 匿名函数递归收集聚合表达式
+  function<RC(unique_ptr<Expression>&)> collector = [&](unique_ptr<Expression> &expr) -> RC {
     RC rc = RC::SUCCESS;
     if (expr->type() == ExprType::AGGREGATION) {
       expr->set_pos(aggregate_expressions.size() + group_by_expressions.size());
@@ -292,8 +452,8 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
     rc = ExpressionIterator::iterate_child_expr(*expr, collector);
     return rc;
   };
-
-  function<RC(std::unique_ptr<Expression>&)> bind_group_by_expr = [&](unique_ptr<Expression> &expr) -> RC {
+  // 匿名函数递归收集分组表达式
+  function<RC(unique_ptr<Expression>&)> bind_group_by_expr = [&](unique_ptr<Expression> &expr) -> RC {
     RC rc = RC::SUCCESS;
     for (size_t i = 0; i < group_by_expressions.size(); i++) {
       auto &group_by = group_by_expressions[i];
@@ -310,7 +470,7 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
   };
 
  bool found_unbound_column = false;
-  function<RC(std::unique_ptr<Expression>&)> find_unbound_column = [&](unique_ptr<Expression> &expr) -> RC {
+  function<RC(unique_ptr<Expression>&)> find_unbound_column = [&](unique_ptr<Expression> &expr) -> RC {
     RC rc = RC::SUCCESS;
     if (expr->type() == ExprType::AGGREGATION) {
       // do nothing

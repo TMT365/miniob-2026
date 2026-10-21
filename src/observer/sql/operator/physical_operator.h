@@ -14,12 +14,9 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include <memory>
-#include <string>
-#include <vector>
-
-#include "common/rc.h"
+#include "common/sys/rc.h"
 #include "sql/expr/tuple.h"
+#include "sql/operator/operator_node.h"
 
 class Record;
 class TupleCellSpec;
@@ -41,6 +38,7 @@ enum class PhysicalOperatorType
   TABLE_SCAN_VEC,
   INDEX_SCAN,
   NESTED_LOOP_JOIN,
+  HASH_JOIN,
   EXPLAIN,
   PREDICATE,
   PREDICATE_VEC,
@@ -49,6 +47,7 @@ enum class PhysicalOperatorType
   CALC,
   STRING_LIST,
   DELETE,
+  UPDATE,
   INSERT,
   SCALAR_GROUP_BY,
   HASH_GROUP_BY,
@@ -61,7 +60,7 @@ enum class PhysicalOperatorType
  * @brief 与LogicalOperator对应，物理算子描述执行计划将如何执行
  * @ingroup PhysicalOperator
  */
-class PhysicalOperator
+class PhysicalOperator : public OperatorNode
 {
 public:
   PhysicalOperator() = default;
@@ -71,8 +70,11 @@ public:
   /**
    * 这两个函数是为了打印时使用的，比如在explain中
    */
-  virtual std::string name() const;
-  virtual std::string param() const;
+  virtual string name() const;
+  virtual string param() const;
+
+  bool is_physical() const override { return true; }
+  bool is_logical() const override { return false; }
 
   virtual PhysicalOperatorType type() const = 0;
 
@@ -85,10 +87,10 @@ public:
 
   virtual RC tuple_schema(TupleSchema &schema) const { return RC::UNIMPLEMENTED; }
 
-  void add_child(std::unique_ptr<PhysicalOperator> oper) { children_.emplace_back(std::move(oper)); }
+  void add_child(unique_ptr<PhysicalOperator> oper) { children_.emplace_back(std::move(oper)); }
 
-  std::vector<std::unique_ptr<PhysicalOperator>> &children() { return children_; }
+  vector<unique_ptr<PhysicalOperator>> &children() { return children_; }
 
 protected:
-  std::vector<std::unique_ptr<PhysicalOperator>> children_;
+  vector<unique_ptr<PhysicalOperator>> children_;
 };

@@ -30,15 +30,17 @@ RC ExpressionRewriter::rewrite(unique_ptr<LogicalOperator> &oper, bool &change_m
   RC rc = RC::SUCCESS;
 
   bool sub_change_made = false;
-
+  // 逻辑算子基类里面的成员expression，大都在select里面
   vector<unique_ptr<Expression>> &expressions = oper->expressions();
   for (unique_ptr<Expression> &expr : expressions) {
+    // 查询表达式不只一个，所以要循环
     rc = rewrite_expression(expr, sub_change_made);
     if (rc != RC::SUCCESS) {
       break;
     }
 
     if (sub_change_made && !change_made) {
+      // 只要第一次改过了，就行了
       change_made = true;
     }
   }
@@ -46,12 +48,12 @@ RC ExpressionRewriter::rewrite(unique_ptr<LogicalOperator> &oper, bool &change_m
   if (rc != RC::SUCCESS) {
     return rc;
   }
-
+  // 递归重写子逻辑算子的表达式
   vector<unique_ptr<LogicalOperator>> &child_opers = oper->children();
   for (unique_ptr<LogicalOperator> &child_oper : child_opers) {
-    bool sub_change_made = false;
-    rc                   = rewrite(child_oper, sub_change_made);
-    if (sub_change_made && !change_made) {
+    bool new_sub_change_made = false;
+    rc = rewrite(child_oper, new_sub_change_made);
+    if (new_sub_change_made && !change_made) {
       change_made = true;
     }
     if (rc != RC::SUCCESS) {
@@ -60,20 +62,24 @@ RC ExpressionRewriter::rewrite(unique_ptr<LogicalOperator> &oper, bool &change_m
   }
   return rc;
 }
-
+// 递归重写表达式
 RC ExpressionRewriter::rewrite_expression(unique_ptr<Expression> &expr, bool &change_made)
 {
   RC rc = RC::SUCCESS;
 
   change_made = false;
+  /**
+   * 这里递归调用rewrite_expression，是为了先对子表达式进行重写，再对子表达式的父表达式进行重写。
+   * 比如WHERE 1 + 2 = 3，先对子表达式1 + 2进行重写，得到3，再对子表达式3 = 3进行重写，得到true。
+   */
   for (unique_ptr<ExpressionRewriteRule> &rule : expr_rewrite_rules_) {
     bool sub_change_made = false;
-
-    rc                   = rule->rewrite(expr, sub_change_made);
+    rc = rule->rewrite(expr, sub_change_made);
     if (sub_change_made && !change_made) {
       change_made = true;
     }
     if (rc != RC::SUCCESS) {
+      // 这里直接跳出循环，因为如果有一个规则失败了，就不应该继续尝试其他规则了。这里不是重写类型不对，而是规则本身执行失败了。
       break;
     }
   }
@@ -91,25 +97,25 @@ RC ExpressionRewriter::rewrite_expression(unique_ptr<Expression> &expr, bool &ch
     case ExprType::CAST: {
       unique_ptr<Expression> &child_expr = (static_cast<CastExpr *>(expr.get()))->child();
 
-      rc                                      = rewrite_expression(child_expr, change_made);
+      rc = rewrite_expression(child_expr, change_made);
     } break;
 
     case ExprType::COMPARISON: {
-      auto                         comparison_expr = static_cast<ComparisonExpr *>(expr.get());
+      auto comparison_expr = static_cast<ComparisonExpr *>(expr.get());
 
-      unique_ptr<Expression> &left_expr       = comparison_expr->left();
-      unique_ptr<Expression> &right_expr      = comparison_expr->right();
+      unique_ptr<Expression> &left_expr = comparison_expr->left();
+      unique_ptr<Expression> &right_expr = comparison_expr->right();
 
       bool left_change_made = false;
 
-      rc                    = rewrite_expression(left_expr, left_change_made);
+      rc  = rewrite_expression(left_expr, left_change_made);
       if (rc != RC::SUCCESS) {
         return rc;
       }
 
       bool right_change_made = false;
 
-      rc                     = rewrite_expression(right_expr, right_change_made);
+      rc = rewrite_expression(right_expr, right_change_made);
       if (rc != RC::SUCCESS) {
         return rc;
       }
@@ -120,13 +126,13 @@ RC ExpressionRewriter::rewrite_expression(unique_ptr<Expression> &expr, bool &ch
     } break;
 
     case ExprType::CONJUNCTION: {
-      auto                                      conjunction_expr = static_cast<ConjunctionExpr *>(expr.get());
+      auto conjunction_expr = static_cast<ConjunctionExpr *>(expr.get());
 
-      vector<unique_ptr<Expression>> &children         = conjunction_expr->children();
+      vector<unique_ptr<Expression>> &children = conjunction_expr->children();
       for (unique_ptr<Expression> &child_expr : children) {
         bool sub_change_made = false;
 
-        rc                   = rewrite_expression(child_expr, sub_change_made);
+        rc = rewrite_expression(child_expr, sub_change_made);
         if (rc != RC::SUCCESS) {
 
           LOG_WARN("failed to rewriter conjunction sub expression. rc=%s", strrc(rc));
@@ -134,6 +140,20 @@ RC ExpressionRewriter::rewrite_expression(unique_ptr<Expression> &expr, bool &ch
         }
 
         if (sub_change_made && !change_made) {
+          change_made = true;
+        }
+      }
+    } break;
+
+    case ExprType::FUNCTION: {
+      auto &function_expr = static_cast<FunctionExpr &>(*expr);
+      for (auto &arg : function_expr.args()) {
+        bool sub_change_made = false;
+        rc = rewrite_expression(arg, sub_change_made);
+        if (OB_FAIL(rc)) {
+          return rc;
+        }
+        if (sub_change_made) {
           change_made = true;
         }
       }

@@ -8,12 +8,12 @@ EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
-#include <vector>
-#include <iostream>
-#include <unordered_map>
+#pragma once
 
+#include "common/lang/vector.h"
+#include "common/lang/unordered_map.h"
 #include "common/math/simd_util.h"
-#include "common/rc.h"
+#include "common/sys/rc.h"
 #include "sql/expr/expression.h"
 
 /**
@@ -35,7 +35,7 @@ public:
      */
     virtual RC next(Chunk &chunk) = 0;
 
-    virtual void close_scan(){};
+    virtual void close_scan() {}
 
   protected:
     AggregateHashTable *hash_table_;
@@ -47,6 +47,8 @@ public:
   virtual RC add_chunk(Chunk &groups_chunk, Chunk &aggrs_chunk) = 0;
 
   virtual ~AggregateHashTable() = default;
+  vector<AggregateExpr::Type> aggr_types_;
+  vector<AttrType>            aggr_child_types_;
 };
 
 class StandardAggregateHashTable : public AggregateHashTable
@@ -54,16 +56,16 @@ class StandardAggregateHashTable : public AggregateHashTable
 private:
   struct VectorHash
   {
-    std::size_t operator()(const std::vector<Value> &vec) const;
+    size_t operator()(const vector<Value> &vec) const;
   };
 
   struct VectorEqual
   {
-    bool operator()(const std::vector<Value> &lhs, const std::vector<Value> &rhs) const;
+    bool operator()(const vector<Value> &lhs, const vector<Value> &rhs) const;
   };
 
 public:
-  using StandardHashTable = std::unordered_map<std::vector<Value>, std::vector<Value>, VectorHash, VectorEqual>;
+  using StandardHashTable = unordered_map<vector<Value>, vector<void *>, VectorHash, VectorEqual>;
   class Scanner : public AggregateHashTable::Scanner
   {
   public:
@@ -78,26 +80,31 @@ public:
     StandardHashTable::iterator end_;
     StandardHashTable::iterator it_;
   };
-  StandardAggregateHashTable(const std::vector<Expression *> aggregations)
+  StandardAggregateHashTable(const vector<Expression *> aggregations)
   {
     for (auto &expr : aggregations) {
       ASSERT(expr->type() == ExprType::AGGREGATION, "expect aggregate expression");
       auto *aggregation_expr = static_cast<AggregateExpr *>(expr);
       aggr_types_.push_back(aggregation_expr->aggregate_type());
+      aggr_child_types_.push_back(aggregation_expr->value_type());
     }
   }
-
-  virtual ~StandardAggregateHashTable() {}
+  virtual ~StandardAggregateHashTable()
+  {
+    for (auto &aggr : aggr_values_) {
+      for (auto &state : aggr.second) {
+        free(state);
+      }
+    }
+  }
 
   RC add_chunk(Chunk &groups_chunk, Chunk &aggrs_chunk) override;
 
   StandardHashTable::iterator begin() { return aggr_values_.begin(); }
   StandardHashTable::iterator end() { return aggr_values_.end(); }
 
-private:
   /// group by values -> aggregate values
-  StandardHashTable                aggr_values_;
-  std::vector<AggregateExpr::Type> aggr_types_;
+  StandardHashTable aggr_values_;
 };
 
 /**
@@ -162,10 +169,10 @@ private:
   static const int EMPTY_KEY;
   static const int DEFAULT_CAPACITY;
 
-  std::vector<int>    keys_;
-  std::vector<V>      values_;
+  vector<int>         keys_;
+  vector<V>           values_;
   int                 size_     = 0;
   int                 capacity_ = 0;
   AggregateExpr::Type aggregate_type_;
 };
-#endif
+#endif  // USE_SIMD

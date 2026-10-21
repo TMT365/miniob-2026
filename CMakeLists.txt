@@ -7,22 +7,36 @@ MESSAGE(STATUS "This is Project source dir " ${PROJECT_SOURCE_DIR})
 MESSAGE(STATUS "This is PROJECT_BINARY_DIR dir " ${PROJECT_BINARY_DIR})
 
 SET(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
+SET(UNITTEST_OUTPUT_PATH ${PROJECT_BINARY_DIR}/unittest)
 
+SET(CMAKE_PREFIX_PATH "${PROJECT_SOURCE_DIR}/deps/3rd/usr/local;/usr/local;${CMAKE_PREFIX_PATH}")
 SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/cmake)
 
+# 设置默认构建类型为 Debug
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type:Default is debug" FORCE)
+endif()
+string(TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_LOWER)
+
+# 输出当前构建类型
+message(STATUS "Using build type: ${CMAKE_BUILD_TYPE}")
+
+option(ENABLE_LSM "Enable LSM storage engine" OFF)
+option(ENABLE_MVCC "Enable MVCC transaction" OFF)
 OPTION(ENABLE_ASAN "Enable build with address sanitizer" ON)
 OPTION(ENABLE_TSAN "Build with thread sanitizer" OFF)
 OPTION(ENABLE_UBSAN "Build with undefined behavior sanitizer" OFF)
 OPTION(WITH_UNIT_TESTS "Compile miniob with unit tests" ON)
 OPTION(WITH_BENCHMARK "Compile benchmark" OFF)
 # TODO: support MemTracer with sanitizers, currently MemTracer doesn't work with sanitizers.
-OPTION(WITH_MEMTRACER "Compile memtracer" OFF)
+OPTION(WITH_MEMTRACER "Compile memtracer" ON)
 OPTION(ENABLE_COVERAGE "Enable unittest coverage" OFF)
 OPTION(ENABLE_NOPIE "Enable no pie" OFF)
 OPTION(CONCURRENCY "Support concurrency operations" OFF)
 OPTION(STATIC_STDLIB "Link std library static or dynamic, such as libgcc, libstdc++, libasan" OFF)
 OPTION(USE_SIMD "Use SIMD" OFF)
 OPTION(USE_MUSL_LIBC "Use musl libc" OFF)
+OPTION(WITH_CPPLINGS "Compile cpplings" ON)
 
 MESSAGE(STATUS "HOME dir: $ENV{HOME}")
 #SET(ENV{变量名} 值)
@@ -43,9 +57,21 @@ ELSE()
     MESSAGE(STATUS "This is UNKNOW OS")
 ENDIF(WIN32)
 
+IF(APPLE AND WITH_MEMTRACER AND NOT ENABLE_ASAN)
+    # Force flat namespace to make DYLD_INSERT_LIBRARIES work more like LD_PRELOAD on Linux.
+    # This ensures that our hooks in memtracer intercept all calls, even from system libraries.
+    ADD_LINK_OPTIONS(-Wl,-flat_namespace)
+ENDIF()
+
 # This is for clangd plugin for vscode
 # mute sign-compare error in lex/yacc
 SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} -Wall -Werror -Wno-error=sign-compare")
+IF ("${CMAKE_BUILD_TYPE_LOWER}" STREQUAL "debug")
+    SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} -DDEBUG -g -O0")
+ELSEIF ("${CMAKE_BUILD_TYPE_LOWER}" STREQUAL "release")
+    SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} -g -O2")
+ENDIF()
+
 IF (ENABLE_NOPIE)
     SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} -no-pie")
     ADD_LINK_OPTIONS(-no-pie)
@@ -56,19 +82,6 @@ IF(USE_SIMD)
     SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} -mavx2")
     ADD_DEFINITIONS(-DUSE_SIMD)
 ENDIF(USE_SIMD)
-
-IF(DEBUG)
-    MESSAGE(STATUS "DEBUG has been set as TRUE ${DEBUG}")
-    SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS}  -O0 -g -DDEBUG ")
-    ADD_DEFINITIONS(-DENABLE_DEBUG)
-ELSEIF(NOT DEFINED ENV{DEBUG})
-    MESSAGE(STATUS "Disable debug")
-    SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS}  -O2 -g ")
-ELSE()
-    MESSAGE(STATUS "Enable debug")
-    SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS}  -O0 -g -DDEBUG")
-    ADD_DEFINITIONS(-DENABLE_DEBUG)
-ENDIF(DEBUG)
 
 IF (CONCURRENCY)
     MESSAGE(STATUS "CONCURRENCY is ON")
@@ -96,6 +109,7 @@ IF (ENABLE_ASAN)
     IF ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND ${STATIC_STDLIB})
         ADD_LINK_OPTIONS(-static-libasan)
     ENDIF()
+    add_definitions(-DENABLE_ASAN)
 ENDIF()
 
 IF (ENABLE_TSAN)
@@ -153,24 +167,28 @@ IF (EXISTS /usr/local/lib64)
     LINK_DIRECTORIES (/usr/local/lib64)
 ENDIF ()
 
-INCLUDE_DIRECTORIES(. ${PROJECT_SOURCE_DIR}/deps /usr/local/include)
+INCLUDE_DIRECTORIES(. ${PROJECT_SOURCE_DIR}/deps ${PROJECT_SOURCE_DIR}/src /usr/local/include)
 
 IF(WITH_UNIT_TESTS)
     IF (ENABLE_COVERAGE)
-        SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} -fprofile-arcs -ftest-coverage")
+        SET(CMAKE_COMMON_FLAGS "${CMAKE_COMMON_FLAGS} -fprofile-arcs -ftest-coverage -fprofile-update=atomic")
     ENDIF (ENABLE_COVERAGE)
     enable_testing()
 ENDIF(WITH_UNIT_TESTS)
 
 SET(CMAKE_CXX_FLAGS ${CMAKE_COMMON_FLAGS})
 SET(CMAKE_C_FLAGS ${CMAKE_COMMON_FLAGS})
+
 MESSAGE(STATUS "CMAKE_CXX_FLAGS is " ${CMAKE_CXX_FLAGS})
 
+# Line Reading configs
+MESSAGE(STATUS "Using replxx for line reading")
+FIND_PACKAGE(Threads REQUIRED)
+FIND_PACKAGE(replxx REQUIRED)
+
 # ADD_SUBDIRECTORY(src bin)  bin 为目标目录， 可以省略
-ADD_SUBDIRECTORY(deps)
-ADD_SUBDIRECTORY(src/obclient)
-ADD_SUBDIRECTORY(src/observer)
-ADD_SUBDIRECTORY(test/perf)
+# ADD_SUBDIRECTORY(deps)
+ADD_SUBDIRECTORY(src)
 ADD_SUBDIRECTORY(tools)
 
 IF (WITH_BENCHMARK)

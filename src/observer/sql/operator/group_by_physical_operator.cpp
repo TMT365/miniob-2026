@@ -11,9 +11,9 @@ See the Mulan PSL v2 for more details. */
 //
 // Created by WangYunlai on 2024/06/11.
 //
-#include <algorithm>
 
 #include "common/log/log.h"
+#include "common/lang/ranges.h"
 #include "sql/operator/group_by_physical_operator.h"
 #include "sql/expr/expression_tuple.h"
 #include "sql/expr/composite_tuple.h"
@@ -37,7 +37,12 @@ void GroupByPhysicalOperator::create_aggregator_list(AggregatorList &aggregator_
 {
   aggregator_list.clear();
   aggregator_list.reserve(aggregate_expressions_.size());
-  ranges::for_each(aggregate_expressions_, [&aggregator_list](Expression *expr) {
+  /* NOTE
+   * 这里使用for循环为aggregator_list创建聚合器对象，聚合器对象是根据聚合表达式的类型来创建的，比如COUNT、SUM、AVG等。每个聚合器对象都是一个独立的实例，用于在分组计算中累积和计算结果。
+   * [&](Expression *expr) {}
+   * 这里使用了lambda表达式来遍历aggregate_expressions_，并为每个聚合表达式创建一个对应的聚合器对象，并将其添加到aggregator_list中。
+   */
+  std::ranges::for_each(aggregate_expressions_, [&aggregator_list](Expression *expr) {
     auto *aggregate_expr = static_cast<AggregateExpr *>(expr);
     aggregator_list.emplace_back(aggregate_expr->create_aggregator());
   });

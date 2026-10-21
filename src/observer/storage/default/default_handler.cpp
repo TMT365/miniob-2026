@@ -14,9 +14,6 @@ See the Mulan PSL v2 for more details. */
 
 #include "storage/default/default_handler.h"
 
-#include <string>
-#include <filesystem>
-
 #include "common/lang/string.h"
 #include "common/log/log.h"
 #include "common/os/path.h"
@@ -33,7 +30,7 @@ DefaultHandler::DefaultHandler() {}
 
 DefaultHandler::~DefaultHandler() noexcept { destroy(); }
 
-RC DefaultHandler::init(const char *base_dir, const char *trx_kit_name, const char *log_handler_name)
+RC DefaultHandler::init(const char *base_dir, const char *trx_kit_name, const char *log_handler_name, const char *storage_engine)
 {
   // 检查目录是否存在，或者创建
   filesystem::path db_dir(base_dir);
@@ -48,6 +45,7 @@ RC DefaultHandler::init(const char *base_dir, const char *trx_kit_name, const ch
   db_dir_   = db_dir;
   trx_kit_name_ = trx_kit_name;
   log_handler_name_ = log_handler_name;
+  storage_engine_ = storage_engine;
 
   const char *sys_db = "sys";
 
@@ -123,7 +121,7 @@ RC DefaultHandler::open_db(const char *dbname)
   // open db
   Db *db  = new Db();
   RC  ret = RC::SUCCESS;
-  if ((ret = db->init(dbname, dbpath.c_str(), trx_kit_name_.c_str(), log_handler_name_.c_str())) != RC::SUCCESS) {
+  if ((ret = db->init(dbname, dbpath.c_str(), trx_kit_name_.c_str(), log_handler_name_.c_str(), storage_engine_.c_str())) != RC::SUCCESS) {
     LOG_ERROR("Failed to open db: %s. error=%s", dbname, strrc(ret));
     delete db;
   } else {
@@ -134,16 +132,24 @@ RC DefaultHandler::open_db(const char *dbname)
 
 RC DefaultHandler::close_db(const char *dbname) { return RC::UNIMPLEMENTED; }
 
+// TODO: remove DefaultHandler
 RC DefaultHandler::create_table(const char *dbname, const char *relation_name, span<const AttrInfoSqlNode> attributes)
 {
   Db *db = find_db(dbname);
   if (db == nullptr) {
     return RC::SCHEMA_DB_NOT_OPENED;
   }
-  return db->create_table(relation_name, attributes);
+  return db->create_table(relation_name, attributes, {});
 }
 
-RC DefaultHandler::drop_table(const char *dbname, const char *relation_name) { return RC::UNIMPLEMENTED; }
+RC DefaultHandler::drop_table(const char *dbname, const char *relation_name)
+{
+  Db *db = find_db(dbname);
+  if (db == nullptr) {
+    return RC::SCHEMA_DB_NOT_OPENED;
+  }
+  return db->drop_table(relation_name);
+}
 
 Db *DefaultHandler::find_db(const char *dbname) const
 {

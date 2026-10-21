@@ -17,20 +17,152 @@ See the Mulan PSL v2 for more details. */
 
 RC SumAggregator::accumulate(const Value &value)
 {
-  if (value_.attr_type() == AttrType::UNDEFINED) {
-    value_ = value;
+  if (value.is_null()) {
     return RC::SUCCESS;
   }
-  
-  ASSERT(value.attr_type() == value_.attr_type(), "type mismatch. value type: %s, value_.type: %s", 
-        attr_type_to_string(value.attr_type()), attr_type_to_string(value_.attr_type()));
-  
-  Value::add(value, value_, value_);
+
+  if (!initialized_) {
+    value_       = value;
+    initialized_ = true;
+    return RC::SUCCESS;
+  }
+
+  ASSERT(value.attr_type() == value_.attr_type(), "type mismatch. value type: %s, value_.type: %s",
+      attr_type_to_string(value.attr_type()), attr_type_to_string(value_.attr_type()));
+  return Value::add(value, value_, value_);
+}
+
+RC SumAggregator::evaluate(Value &result)
+{
+  if (initialized_) {
+    result = value_;
+  } else {
+    result.set_null();
+  }
   return RC::SUCCESS;
 }
 
-RC SumAggregator::evaluate(Value& result)
+RC CountAggregator::accumulate(const Value &value)
 {
-  result = value_;
+  if (value.is_null()) {
+    return RC::SUCCESS;
+  }
+
+  if (!initialized_) {
+    value_.set_int(1);
+    initialized_ = true;
+  } else {
+    value_.set_int(value_.get_int() + 1);
+  }
+  return RC::SUCCESS;
+}
+
+RC CountAggregator::evaluate(Value &result)
+{
+  if (initialized_) {
+    result = value_;
+  } else {
+    result.set_int(0);
+  }
+  return RC::SUCCESS;
+}
+
+RC AvgAggregator::accumulate(const Value &value)
+{
+  if (value.is_null()) {
+    return RC::SUCCESS;
+  }
+
+  if (!initialized_) {
+    value_       = value;
+    count_       = 1;
+    initialized_ = true;
+    return RC::SUCCESS;
+  }
+
+  ASSERT(value.attr_type() == value_.attr_type(), "type mismatch. value type: %s, value_.type: %s",
+        attr_type_to_string(value.attr_type()), attr_type_to_string(value_.attr_type()));
+
+  Value::add(value, value_, value_);
+  count_++;
+  return RC::SUCCESS;
+}
+
+RC AvgAggregator::evaluate(Value &result)
+{
+  if (count_ == 0) {
+    result.set_null();
+    return RC::SUCCESS;
+  }
+
+  if (value_.attr_type() == AttrType::INTS) {
+    result.set_float(static_cast<float>(value_.get_int()) / count_);
+  } else if (value_.attr_type() == AttrType::FLOATS) {
+    result.set_float(value_.get_float() / count_);
+  } else {
+    LOG_WARN("unsupported type for average aggregation: %s", attr_type_to_string(value_.attr_type()));
+    return RC::UNIMPLEMENTED;
+  }
+  return RC::SUCCESS;
+}
+
+RC MinAggregator::accumulate(const Value &value)
+{
+  if (value.is_null()) {
+    return RC::SUCCESS;
+  }
+
+  if (!initialized_) {
+    value_       = value;
+    initialized_ = true;
+    return RC::SUCCESS;
+  }
+
+  ASSERT(value.attr_type() == value_.attr_type(), "type mismatch. value type: %s, value_.type: %s",
+        attr_type_to_string(value.attr_type()), attr_type_to_string(value_.attr_type()));
+
+  int result = value_.compare(value);
+  if (result > 0)
+    value_ = value;
+  return RC::SUCCESS;
+}
+
+RC MinAggregator::evaluate(Value &result)
+{
+  if (initialized_) {
+    result = value_;
+  } else {
+    result.set_null();
+  }
+  return RC::SUCCESS;
+}
+
+RC MaxAggregator::accumulate(const Value &value)
+{
+  if (value.is_null()) {
+    return RC::SUCCESS;
+  }
+
+  if (!initialized_) {
+    value_       = value;
+    initialized_ = true;
+    return RC::SUCCESS;
+  }
+
+  ASSERT(value.attr_type() == value_.attr_type(), "type mismatch. value type: %s, value_.type: %s",
+        attr_type_to_string(value.attr_type()), attr_type_to_string(value_.attr_type()));
+
+  if (value_.compare(value) < 0)
+    value_ = value;
+  return RC::SUCCESS;
+}
+
+RC MaxAggregator::evaluate(Value &result)
+{
+  if (initialized_) {
+    result = value_;
+  } else {
+    result.set_null();
+  }
   return RC::SUCCESS;
 }

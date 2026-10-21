@@ -31,14 +31,15 @@ public:
   SQLStageEvent(SessionEvent *event, const string &sql);
   virtual ~SQLStageEvent() noexcept;
 
+  // getter
   SessionEvent *session_event() const { return session_event_; }
-
   const string                       &sql() const { return sql_; }
   const unique_ptr<ParsedSqlNode>    &sql_node() const { return sql_node_; }
   Stmt                               *stmt() const { return stmt_; }
   unique_ptr<PhysicalOperator>       &physical_operator() { return operator_; }
   const unique_ptr<PhysicalOperator> &physical_operator() const { return operator_; }
 
+  // setter
   void set_sql(const char *sql) { sql_ = sql; }
   void set_sql_node(unique_ptr<ParsedSqlNode> sql_node) { sql_node_ = std::move(sql_node); }
   void set_stmt(Stmt *stmt) { stmt_ = stmt; }

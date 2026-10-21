@@ -14,8 +14,9 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include "common/rc.h"
+#include "common/sys/rc.h"
 #include "common/lang/string.h"
+#include "./observer/common/type/index_type.h"
 
 class TableMeta;
 class FieldMeta;
@@ -35,11 +36,13 @@ class IndexMeta
 public:
   IndexMeta() = default;
 
-  RC init(const char *name, const FieldMeta &field);
+  RC init(const char *name, const vector<FieldMeta> &field, IndexType type);
 
 public:
   const char *name() const;
-  const char *field() const;
+  const vector<string> &fields() const;
+  const IndexType &type() const;
+  const char *fields_str() const;
 
   void desc(ostream &os) const;
 
@@ -47,7 +50,10 @@ public:
   void      to_json(Json::Value &json_value) const;
   static RC from_json(const TableMeta &table, const Json::Value &json_value, IndexMeta &index);
 
+// 保护字段可以被子类使用
 protected:
   string name_;   // index's name
-  string field_;  // field's name
+  vector<string> fields_;  // 支持复合索引
+  string fields_str_;  // 复合索引的字段名拼接字符串，方便打印 [field1, field2, field3]
+  IndexType type_;
 };

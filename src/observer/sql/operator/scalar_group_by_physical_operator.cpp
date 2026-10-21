@@ -37,8 +37,17 @@ RC ScalarGroupByPhysicalOperator::open(Trx *trx)
 
   ExpressionTuple<Expression *> group_value_expression_tuple(value_expressions_);
 
-  ValueListTuple group_by_evaluated_tuple;
+  /* 聚合器要先建好。
+   * 即使输入为空(比如 WHERE 把所有行都过滤掉了)，标量聚合也要输出一行：
+   * count 是 0，sum/avg/min/max 是 NULL。
+   * 如果这里不建，group_value_ 会一直是 nullptr，next() 直接返回 EOF，
+   * 上层的 Project 算子拿到 nullptr 再去取值就会崩掉。
+   */
+  AggregatorList aggregator_list;
+  create_aggregator_list(aggregator_list);
+  group_value_ = make_unique<GroupValueType>(std::move(aggregator_list), CompositeTuple());
 
+  bool first_record = true;
   while (OB_SUCC(rc = child.next())) {
     Tuple *child_tuple = child.current_tuple();
     if (nullptr == child_tuple) {
@@ -49,10 +58,9 @@ RC ScalarGroupByPhysicalOperator::open(Trx *trx)
     // 计算需要做聚合的值
     group_value_expression_tuple.set_tuple(child_tuple);
 
-    // 计算聚合值
-    if (group_value_ == nullptr) {
-      AggregatorList aggregator_list;
-      create_aggregator_list(aggregator_list);
+    // 记录第一条记录的值
+    if (first_record) {
+      first_record = false;
 
       ValueListTuple child_tuple_to_value;
       rc = ValueListTuple::make(*child_tuple, child_tuple_to_value);
@@ -61,11 +69,10 @@ RC ScalarGroupByPhysicalOperator::open(Trx *trx)
         return rc;
       }
 
-      CompositeTuple composite_tuple;
-      composite_tuple.add_tuple(make_unique<ValueListTuple>(std::move(child_tuple_to_value)));
-      group_value_ = make_unique<GroupValueType>(std::move(aggregator_list), std::move(composite_tuple));
+      get<1>(*group_value_).add_tuple(make_unique<ValueListTuple>(std::move(child_tuple_to_value)));
     }
-    
+
+    // 计算聚合值
     rc = aggregate(get<0>(*group_value_), group_value_expression_tuple);
     if (OB_FAIL(rc)) {
       LOG_WARN("failed to aggregate values. rc=%s", strrc(rc));
@@ -83,9 +90,7 @@ RC ScalarGroupByPhysicalOperator::open(Trx *trx)
   }
 
   // 得到最终聚合后的值
-  if (group_value_) {
-    rc = evaluate(*group_value_);
-  }
+  rc = evaluate(*group_value_);
 
   emitted_ = false;
   return rc;
@@ -106,6 +111,7 @@ RC ScalarGroupByPhysicalOperator::close()
 {
   group_value_.reset();
   emitted_ = false;
+  children_[0]->close();
   return RC::SUCCESS;
 }
 

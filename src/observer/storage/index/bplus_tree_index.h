@@ -27,12 +27,13 @@ public:
   BplusTreeIndex() = default;
   virtual ~BplusTreeIndex() noexcept;
 
-  RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta) override;
-  RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta) override;
+  RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const vector<FieldMeta> &field_metas) override;
+  RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const vector<FieldMeta> &field_metas) override;
   RC close();
 
   RC insert_entry(const char *record, const RID *rid) override;
   RC delete_entry(const char *record, const RID *rid) override;
+  RC check_exists(const char *record, bool &exists) override;
 
   /**
    * 扫描指定范围的数据
@@ -41,6 +42,20 @@ public:
       int right_len, bool right_inclusive) override;
 
   RC sync() override;
+
+  bool is_vector_index() override
+  {
+    return false;
+  }
+
+private:
+  /**
+   * @brief 按索引列的顺序，从记录中切出用户键
+   * @param record 记录数据
+   * @param key 用户键的缓冲区，长度为所有索引列长度之和
+   * @param key_len key 缓冲区的长度
+   */
+  RC build_key(const char *record, char *key, int key_len) const;
 
 private:
   bool             inited_ = false;

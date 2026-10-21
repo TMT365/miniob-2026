@@ -30,11 +30,32 @@ public:
 
   LogicalOperatorType type() const override { return LogicalOperatorType::TABLE_GET; }
 
+  OpType get_op_type() const override { return OpType::LOGICALGET; }
+
+  virtual uint64_t hash() const override
+  {
+    uint64_t hash = std::hash<int>()(static_cast<int>(get_op_type()));
+    hash ^= std::hash<int>()(table_->table_id());
+    return hash;
+  }
+
+  virtual bool operator==(const OperatorNode &other) const override
+  {
+    if (get_op_type() != other.get_op_type())
+      return false;
+    const auto &other_get = dynamic_cast<const TableGetLogicalOperator *>(&other);
+    if (table_->table_id() != other_get->table()->table_id())
+      return false;
+    return true;
+  }
+
+  unique_ptr<LogicalProperty> find_log_prop(const vector<LogicalProperty *> &log_props) override;
+
   Table        *table() const { return table_; }
   ReadWriteMode read_write_mode() const { return mode_; }
 
-  void set_predicates(std::vector<std::unique_ptr<Expression>> &&exprs);
-  auto predicates() -> std::vector<std::unique_ptr<Expression>> & { return predicates_; }
+  void set_predicates(vector<unique_ptr<Expression>> &&exprs);
+  auto predicates() -> vector<unique_ptr<Expression>> & { return predicates_; }
 
 private:
   Table        *table_ = nullptr;
@@ -44,5 +65,5 @@ private:
   // 这里的表达式都是比较简单的比较运算，并且左右两边都是取字段表达式或值表达式
   // 不包含复杂的表达式运算，比如加减乘除、或者conjunction expression
   // 如果有多个表达式，他们的关系都是 AND
-  std::vector<std::unique_ptr<Expression>> predicates_;
+  vector<unique_ptr<Expression>> predicates_;
 };

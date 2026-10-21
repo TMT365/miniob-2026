@@ -14,7 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include "common/rc.h"
+#include "common/sys/rc.h"
 
 class SQLStageEvent;
 class Table;
@@ -33,5 +33,5 @@ public:
   RC execute(SQLStageEvent *sql_event);
 
 private:
-  void load_data(Table *table, const char *file_name, SqlResult *sql_result);
+  void load_data(Table *table, const char *file_name, char terminated, char enclosed, SqlResult *sql_result);
 };

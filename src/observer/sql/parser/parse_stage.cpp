@@ -13,7 +13,6 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include <string.h>
-#include <string>
 
 #include "parse_stage.h"
 
@@ -26,16 +25,19 @@ See the Mulan PSL v2 for more details. */
 #include "sql/parser/parse.h"
 
 using namespace common;
-
+/**
+ * SQLStageEvent的处理函数，主要是解析SQL语句，并将解析结果放入SQLStageEvent中。
+ * @param sql_event SQLStageEvent对象，包含SQL语句和解析结果
+ */
 RC ParseStage::handle_request(SQLStageEvent *sql_event)
 {
   RC rc = RC::SUCCESS;
 
   SqlResult         *sql_result = sql_event->session_event()->sql_result();
-  const std::string &sql        = sql_event->sql();
+  const string &sql        = sql_event->sql();
 
   ParsedSqlResult parsed_sql_result;
-
+  // 调用SQL解析器解析SQL语句
   parse(sql.c_str(), &parsed_sql_result);
   if (parsed_sql_result.sql_nodes().empty()) {
     sql_result->set_return_code(RC::SUCCESS);
@@ -47,7 +49,7 @@ RC ParseStage::handle_request(SQLStageEvent *sql_event)
     LOG_WARN("got multi sql commands but only 1 will be handled");
   }
 
-  std::unique_ptr<ParsedSqlNode> sql_node = std::move(parsed_sql_result.sql_nodes().front());
+  unique_ptr<ParsedSqlNode> sql_node = std::move(parsed_sql_result.sql_nodes().front());
   if (sql_node->flag == SCF_ERROR) {
     // set error information to event
     rc = RC::SQL_SYNTAX;

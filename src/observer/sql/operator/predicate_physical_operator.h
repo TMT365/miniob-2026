@@ -26,11 +26,12 @@ class FilterStmt;
 class PredicatePhysicalOperator : public PhysicalOperator
 {
 public:
-  PredicatePhysicalOperator(std::unique_ptr<Expression> expr);
+  PredicatePhysicalOperator(unique_ptr<Expression> expr);
 
   virtual ~PredicatePhysicalOperator() = default;
 
   PhysicalOperatorType type() const override { return PhysicalOperatorType::PREDICATE; }
+  OpType               get_op_type() const override { return OpType::FILTER; }
 
   RC open(Trx *trx) override;
   RC next() override;
@@ -41,5 +42,5 @@ public:
   RC tuple_schema(TupleSchema &schema) const override;
 
 private:
-  std::unique_ptr<Expression> expression_;
+  unique_ptr<Expression> expression_;
 };

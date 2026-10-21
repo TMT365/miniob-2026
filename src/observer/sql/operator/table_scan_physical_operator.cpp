@@ -31,12 +31,14 @@ RC TableScanPhysicalOperator::open(Trx *trx)
 RC TableScanPhysicalOperator::next()
 {
   RC rc = RC::SUCCESS;
-
+  // TODO 后续优化的时候如果where已经可以判断是非法的就直接停止，不要在获取了
   bool filter_result = false;
-  while (OB_SUCC(rc = record_scanner_.next(current_record_))) {
+  // 循环从表里面获取记录，直到获取到满足条件的记录为止
+  while (OB_SUCC(rc = record_scanner_->next(current_record_))) {
     LOG_TRACE("got a record. rid=%s", current_record_.rid().to_string().c_str());
     
     tuple_.set_record(&current_record_);
+    // NOTE 这里是对记录继续进行过滤，主要是为了支持复杂的表达式过滤条件，比如 where a + b > 10
     rc = filter(tuple_, filter_result);
     if (rc != RC::SUCCESS) {
       LOG_TRACE("record filtered failed=%s", strrc(rc));
@@ -53,7 +55,19 @@ RC TableScanPhysicalOperator::next()
   return rc;
 }
 
-RC TableScanPhysicalOperator::close() { return record_scanner_.close_scan(); }
+RC TableScanPhysicalOperator::close() {
+  RC rc = RC::SUCCESS;
+  if (record_scanner_ != nullptr) {
+    rc = record_scanner_->close_scan();
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to close record scanner");
+    }
+    delete record_scanner_;
+    record_scanner_ = nullptr;
+  }
+  return rc;
+
+}
 
 Tuple *TableScanPhysicalOperator::current_tuple()
 {
@@ -72,12 +86,14 @@ RC TableScanPhysicalOperator::filter(RowTuple &tuple, bool &result)
 {
   RC    rc = RC::SUCCESS;
   Value value;
+  // 这里的是 where 和 join on 条件的过滤，只有满足所有条件的记录才会返回给上层算子，如果 where 是
+  // ValueExpr(AttrType::NULL_VALS) comp ... 应该要设置过滤语句为false
   for (unique_ptr<Expression> &expr : predicates_) {
     rc = expr->get_value(tuple, value);
     if (rc != RC::SUCCESS) {
       return rc;
     }
-
+    // result = true 表示满足条件，result = false 表示不满足条件
     bool tmp_result = value.get_boolean();
     if (!tmp_result) {
       result = false;

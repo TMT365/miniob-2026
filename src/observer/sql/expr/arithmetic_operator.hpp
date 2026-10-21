@@ -10,6 +10,7 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#include <limits>
 #if defined(USE_SIMD)
 #include "common/math/simd_util.h"
 #endif
@@ -174,12 +175,35 @@ struct MultiplyOperator
 
 struct DivideOperator
 {
+  // template <class T>
+  // static inline T operation(T left, T right)
+  // {
+  //   // TODO: `right = 0` is invalid
+  //   return left / right;
+  // }
   template <class T>
   static inline T operation(T left, T right)
   {
-    // TODO: `right = 0` is invalid
+    if (right == 0) {
+      return std::numeric_limits<T>::max();  // sentinel 值
+    }
     return left / right;
   }
+
+  template <class T>
+  static inline bool is_sentinel(T value)
+  { return value == std::numeric_limits<T>::max(); }
+
+  // float 特化版本
+  static inline float operation(float left, float right)
+  {
+    if (right > -EPSILON && right < EPSILON) {
+      return std::numeric_limits<float>::max();
+    }
+    return left / right;
+  }
+
+  static inline bool is_sentinel(float value) { return value > (std::numeric_limits<float>::max() - 1); }
 
 #if defined(USE_SIMD)
   static inline __m256  operation(__m256 left, __m256 right) { return _mm256_div_ps(left, right); }
@@ -205,11 +229,11 @@ struct NegateOperator
 };
 
 template <typename T, bool LEFT_CONSTANT, bool RIGHT_CONSTANT, class OP>
-void compare_operation(T *left, T *right, int n, std::vector<uint8_t> &result)
+void compare_operation(T *left, T *right, int n, vector<uint8_t> &result)
 {
 #if defined(USE_SIMD)
   int           i          = 0;
-  if constexpr (std::is_same<T, float>::value) {
+  if constexpr (is_same<T, float>::value) {
     for (; i <= n - SIMD_WIDTH; i += SIMD_WIDTH) {
       __m256 left_value, right_value;
 
@@ -232,7 +256,7 @@ void compare_operation(T *left, T *right, int n, std::vector<uint8_t> &result)
         result[i + j] &= mm256_extract_epi32_var_indx(mask, j) ? 1 : 0;
       }
     }
-  } else if constexpr (std::is_same<T, int>::value) {
+  } else if constexpr (is_same<T, int>::value) {
     for (; i <= n - SIMD_WIDTH; i += SIMD_WIDTH) {
       __m256i left_value, right_value;
 
@@ -276,7 +300,7 @@ void binary_operator(T *left_data, T *right_data, T *result_data, int size)
 #if defined(USE_SIMD)
   int i = 0;
 
-  if constexpr (std::is_same<T, float>::value) {
+  if constexpr (is_same<T, float>::value) {
     for (; i <= size - SIMD_WIDTH; i += SIMD_WIDTH) {
       __m256 left_value, right_value;
 
@@ -295,7 +319,7 @@ void binary_operator(T *left_data, T *right_data, T *result_data, int size)
       __m256 result_value = OP::operation(left_value, right_value);
       _mm256_storeu_ps(&result_data[i], result_value);
     }
-  } else if constexpr (std::is_same<T, int>::value) {
+  } else if constexpr (is_same<T, int>::value) {
     for (; i <= size - SIMD_WIDTH; i += SIMD_WIDTH) {
       __m256i left_value, right_value;
 
@@ -342,7 +366,7 @@ void unary_operator(T *input, T *result_data, int size)
 
 // TODO: optimized with simd
 template <typename T, bool LEFT_CONSTANT, bool RIGHT_CONSTANT>
-void compare_result(T *left, T *right, int n, std::vector<uint8_t> &result, CompOp op)
+void compare_result(T *left, T *right, int n, vector<uint8_t> &result, CompOp op)
 {
   switch (op) {
     case CompOp::EQUAL_TO: {

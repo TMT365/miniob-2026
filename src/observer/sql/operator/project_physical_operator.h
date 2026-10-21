@@ -24,11 +24,18 @@ See the Mulan PSL v2 for more details. */
 class ProjectPhysicalOperator : public PhysicalOperator
 {
 public:
-  ProjectPhysicalOperator(std::vector<std::unique_ptr<Expression>> &&expressions);
+  ProjectPhysicalOperator(vector<unique_ptr<Expression>> &&expressions);
 
   virtual ~ProjectPhysicalOperator() = default;
 
   PhysicalOperatorType type() const override { return PhysicalOperatorType::PROJECT; }
+  OpType               get_op_type() const override { return OpType::PROJECTION; }
+
+  virtual double calculate_cost(
+      LogicalProperty *prop, const vector<LogicalProperty *> &child_log_props, CostModel *cm) override
+  {
+    return (cm->cpu_op()) * prop->get_card();
+  }
 
   RC open(Trx *trx) override;
   RC next() override;
@@ -41,6 +48,6 @@ public:
   RC tuple_schema(TupleSchema &schema) const override;
 
 private:
-  std::vector<std::unique_ptr<Expression>>     expressions_;
-  ExpressionTuple<std::unique_ptr<Expression>> tuple_;
+  vector<unique_ptr<Expression>>          expressions_;
+  ExpressionTuple<unique_ptr<Expression>> tuple_;
 };

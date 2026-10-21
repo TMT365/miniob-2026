@@ -23,13 +23,38 @@ public:
   virtual ~IntegerType() {}
 
   int compare(const Value &left, const Value &right) const override;
+  int compare(const Column &left, const Column &right, int left_idx, int right_idx) const override;
 
   RC add(const Value &left, const Value &right, Value &result) const override;
   RC subtract(const Value &left, const Value &right, Value &result) const override;
   RC multiply(const Value &left, const Value &right, Value &result) const override;
   RC negative(const Value &val, Value &result) const override;
+  RC divide(const Value &left, const Value &right, Value &result) const override;
+  RC cast_to(const Value &val, AttrType type, Value &result) const override;
+
+  int cast_cost(const AttrType type) override
+  {
+    if (type == AttrType::INTS) {
+      return 0;
+    }
+    if (type == AttrType::FLOATS) {
+      return 1;
+    }
+    if (type == AttrType::DATES) {
+      return 2;
+    }
+    if (type == AttrType::CHARS) {
+      return 10;
+    }
+    return INT32_MAX;
+  }
 
   RC set_value_from_str(Value &val, const string &data) const override;
 
   RC to_string(const Value &val, string &result) const override;
+
+private:
+  bool static my_transform_to_char(const Value &val, Value &result);
+  bool static my_transform_to_float(const Value &val, Value &result);
+  bool static my_transform_to_dataTime(const Value &val, Value &result);
 };

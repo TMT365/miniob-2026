@@ -14,7 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include "common/rc.h"
+#include "common/sys/rc.h"
 #include "event/session_event.h"
 #include "event/sql_event.h"
 #include "sql/executor/sql_result.h"
@@ -36,10 +36,26 @@ public:
         "desc `table name`;",
         "create table `table name` (`column name` `column type`, ...);",
         "create index `index name` on `table` (`column`);",
+        "create unique index `index name` on `table` (`column`);",
+        "create primary key `index name` on `table` (`column`);",
+        "drop table `table name`;",
+        "drop index `index name` on `table`;",
+        "analyze table `table name`;",
         "insert into `table` values(`value1`,`value2`);",
         "update `table` set column=value [where `column`=`value`];",
         "delete from `table` [where `column`=`value`];",
-        "select [ * | `columns` ] from `table`;"};
+        "select [ * | `columns` ] from `table` [where ...] [group by `columns`];",
+        "select ... from `table1` [join `table2` on ...];",
+        "select count|sum|avg|min|max(`column`) from `table`;",
+        "begin;",
+        "commit;",
+        "rollback;",
+        "explain `sql statement`;",
+        "calc `expression`;",
+        "load data infile `file name` into table `table name`;",
+        "set `variable` = `value`;",
+        "help;",
+        "exit;"};
 
     auto oper = new StringListPhysicalOperator();
     for (size_t i = 0; i < sizeof(strings) / sizeof(strings[0]); i++) {
@@ -52,7 +68,7 @@ public:
     schema.append_cell("Commands");
 
     sql_result->set_tuple_schema(schema);
-    sql_result->set_operator(std::unique_ptr<PhysicalOperator>(oper));
+    sql_result->set_operator(unique_ptr<PhysicalOperator>(oper));
 
     return RC::SUCCESS;
   }

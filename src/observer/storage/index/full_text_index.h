@@ -1,0 +1,55 @@
+/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
+miniob is licensed under Mulan PSL v2.
+You can use this software according to the terms and conditions of the Mulan PSL v2.
+You may obtain a copy of Mulan PSL v2 at:
+         http://license.coscl.org.cn/MulanPSL2
+THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+See the Mulan PSL v2 for more details. */
+
+#pragma once
+
+#include "common/sys/rc.h"
+#include "../index/index.h"
+#include "../index/index_meta.h"
+#include "../../../common/lang/vector.h"
+
+class Tokenizer;
+struct RID;
+class IndexMeta;
+
+/**
+ * @brief fulltext 全文索引
+ * @ingroup Index
+ */
+class FullTextIndex : public Index
+{
+public:
+  FullTextIndex(){};
+  virtual ~FullTextIndex() noexcept {};
+
+  RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta) override
+  {
+    return RC::UNIMPLEMENTED;
+  }
+  RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta) override
+  {
+    return RC::UNIMPLEMENTED;
+  };
+
+  vector<RID> ann_search(const std::string &base_text, size_t limit) { return vector<RID>(); }
+
+  RC close() { return RC::UNIMPLEMENTED; }
+
+  RC insert_entry(const char *record, const RID *rid) override { return RC::UNIMPLEMENTED; };
+  RC delete_entry(const char *record, const RID *rid) override { return RC::UNIMPLEMENTED; };
+  RC check_exists(const char *record, bool &exists) override { return RC::UNIMPLEMENTED; };
+
+  RC sync() override { return RC::UNIMPLEMENTED; };
+
+private:
+  bool                       inited_ = false;
+  Table                     *table_  = nullptr;
+  std::shared_ptr<Tokenizer> tokenizer_;
+};

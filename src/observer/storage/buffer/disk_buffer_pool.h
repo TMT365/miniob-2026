@@ -31,7 +31,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/memory.h"
 #include "common/lang/unordered_map.h"
 #include "common/mm/mem_pool.h"
-#include "common/rc.h"
+#include "common/sys/rc.h"
 #include "common/types.h"
 #include "storage/buffer/frame.h"
 #include "storage/buffer/page.h"
@@ -71,7 +71,8 @@ struct BPFileHeader
   /**
    * 能够分配的最大的页面个数，即bitmap的字节数 乘以8
    */
-  static const int MAX_PAGE_NUM = (BP_PAGE_DATA_SIZE - sizeof(page_count) - sizeof(allocated_pages)) * 8;
+  static const int MAX_PAGE_NUM =
+      (BP_PAGE_DATA_SIZE - sizeof(buffer_pool_id) - sizeof(page_count) - sizeof(allocated_pages)) * 8;
 
   string to_string() const;
 };

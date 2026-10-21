@@ -18,6 +18,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/memory.h"
 #include "common/type/attr_type.h"
 #include "common/type/data_type.h"
+#include "common/type/string_t.h"
 
 /**
  * @brief 属性的值
@@ -46,6 +47,7 @@ public:
   explicit Value(float val);
   explicit Value(bool val);
   explicit Value(const char *s, int len = 0);
+  explicit Value(const string_t &val);
 
   Value(const Value &other);
   Value(Value &&other);
@@ -53,8 +55,27 @@ public:
   Value &operator=(const Value &other);
   Value &operator=(Value &&other);
 
+  // 重载 ==
+  bool operator==(const Value &other) const;
+  bool operator!=(const Value &other) const
+  {
+    return !(*this == other);
+  }
+  bool operator<(const Value &other) const;
+  bool operator<=(const Value &other) const
+  {
+    return *this < other || *this == other;
+  }
+  bool operator>(const Value &other) const
+  {
+    return !(*this <  other);
+  }
+  bool operator>=(const Value &other) const
+  {
+    return *this > other || *this == other;
+  }
   void reset();
-
+  // right += left;
   static RC add(const Value &left, const Value &right, Value &result)
   {
     return DataType::type_instance(result.attr_type())->add(left, right, result);
@@ -75,6 +96,8 @@ public:
     return DataType::type_instance(result.attr_type())->divide(left, right, result);
   }
 
+  // static RC divide_float(const Value &left, const Value &right, Value &result) {}
+
   static RC negative(const Value &value, Value &result)
   {
     return DataType::type_instance(result.attr_type())->negative(value, result);
@@ -85,49 +108,113 @@ public:
     return DataType::type_instance(value.attr_type())->cast_to(value, to_type, result);
   }
 
-  void set_type(AttrType type) { this->attr_type_ = type; }
-  void set_data(char *data, int length);
-  void set_data(const char *data, int length) { this->set_data(const_cast<char *>(data), length); }
-  void set_value(const Value &value);
-  void set_boolean(bool val);
+  bool is_null() const { return is_null_; }
 
   string to_string() const;
 
   int compare(const Value &other) const;
 
-  const char *data() const;
+  char *data() const;
 
   int      length() const { return length_; }
   AttrType attr_type() const { return attr_type_; }
+  union Val
+  {
+    int32_t int_value_;   ///< 4字节
+    float   float_value_; ///< 4字节
+    bool    bool_value_;  ///< 1字节
+    char   *pointer_value_; ///< 64位中是8字节
+    struct DateValue
+    {
+      int16_t year_    = 0;  ///< 2 bytes
+      int16_t month_   = 0;  ///< 2 bytes
+      int16_t day_     = 0;  ///< 2 bytes
+      int16_t padding_ = 0;  ///< 对齐填充用的，没什么用，不写编译器也会自己把结构体的大小写到8字节
+      DateValue();
+      DateValue(int x);
+      DateValue(const int16_t year, const int16_t month, const int16_t day);
+      string get_four_year() const;
+      string get_two_year() const;
+      string get_two_month() const;
+      string get_two_day() const;
+      //
+    } date_value_;
+  };
 
-public:
   /**
    * 获取对应的值
    * 如果当前的类型与期望获取的类型不符，就会执行转换操作
    */
-  int    get_int() const;
-  float  get_float() const;
-  string get_string() const;
-  bool   get_boolean() const;
+  int      get_int() const;
+  float    get_float() const;
+  string   get_string() const;
+  string_t get_string_t() const;
+  bool     get_boolean() const;
+  const Value::Val::DateValue* get_date() const;
+  string   get_date_to_string() const;
 
-private:
   void set_int(int val);
   void set_float(float val);
   void set_string(const char *s, int len = 0);
+  void set_empty_string(int len);
   void set_string_from_other(const Value &other);
+  bool set_date(const string &date);
+  bool set_date(const int16_t &year, const int16_t &month, const int16_t &day);
+  void set_type(AttrType type) { this->attr_type_ = type; }
+  void set_data(char *data, int length);
+  void set_data(const char *data, int length) { this->set_data(const_cast<char *>(data), length); }
+  void set_value(const Value &value);
+  void set_boolean(bool val);
+  void set_null()
+  {
+    is_null_   = true;
+    attr_type_ = AttrType::NULL_VALS;
+  }
+
+  /**
+   * @brief 把一个值按目标类型和长度序列化到索引键的片段中
+   * @details 索引键的每个片段的长度就是对应列在记录中的长度，序列化出来的字节必须与
+   *          记录里存的字节完全一致，比较才能正确。类型不一致时会先做类型转换。
+   * @param value 待序列化的值
+   * @param type 目标列的类型
+   * @param length 目标列的长度
+   * @param buf 输出缓冲区，长度至少为 length
+   * @param want_greater true 表示是下界。变长字符串的值比列长时，下界要把最后一个字节加一
+   * @param[out] adjusted true 表示值比列长，边界值被截断调整过
+   */
+  static RC serialize_to_key(const Value &value, AttrType type, int length, char *buf, bool want_greater, bool *adjusted);
+
+  /**
+   * @brief 填充某个类型在索引键中的极值
+   * @details 复合索引扫描时，没有约束的列需要用该类型的极值来填充边界键
+   * @param type 列的类型
+   * @param length 该列在索引键中的长度
+   * @param buf 输出缓冲区，长度至少为 length
+   * @param maximum true 取最大值，false 取最小值
+   */
+  static void fill_extreme(AttrType type, int length, char *buf, bool maximum);
+
+  /**
+   * @brief 把用户键片段归一化成指定长度的字节序列
+   * @details 变长字符串列的边界值可能比列本身短(需要补零)或者比列长(需要截断)。
+   *          边界值比列长时，下界要把最后一个字节加一，上界不加，并且边界要变成闭区间。
+   * @param user_key 用户键片段
+   * @param key_len 用户键片段的长度
+   * @param attr_length 列的长度
+   * @param want_greater true 表示是下界(>=)，false 表示是上界(<=)
+   * @param buf 输出缓冲区，长度至少为 attr_length
+   * @param[out] should_inclusive true 表示因为边界值过长，边界需要变成闭区间
+   */
+  static RC normalize_user_key(const char *user_key, int key_len, int attr_length, bool want_greater, char *buf,
+      bool *should_inclusive);
 
 private:
   AttrType attr_type_ = AttrType::UNDEFINED;
   int      length_    = 0;
+  bool     is_null_   = false;
 
-  union Val
-  {
-    int32_t int_value_;
-    float   float_value_;
-    bool    bool_value_;
-    char   *pointer_value_;
-  } value_ = {.int_value_ = 0};
-
+  Val value_ = {.int_value_ = 0};
+  mutable Val::DateValue date_cache_;
   /// 是否申请并占有内存, 目前对于 CHARS 类型 own_data_ 为true, 其余类型 own_data_ 为false
   bool own_data_ = false;
 };

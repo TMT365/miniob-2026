@@ -95,7 +95,8 @@ RC RecordPageIterator::next(Record &record)
 
 RecordPageHandler::~RecordPageHandler() { cleanup(); }
 
-RC RecordPageHandler::init(DiskBufferPool &buffer_pool, LogHandler &log_handler, PageNum page_num, ReadWriteMode mode)
+RC RecordPageHandler::init(DiskBufferPool &buffer_pool, LogHandler &log_handler, PageNum page_num, ReadWriteMode mode,
+    LobFileHandler *lob_handler)
 {
   if (disk_buffer_pool_ != nullptr) {
     if (frame_->page_num() == page_num) {
@@ -105,6 +106,7 @@ RC RecordPageHandler::init(DiskBufferPool &buffer_pool, LogHandler &log_handler,
       cleanup();
     }
   }
+  lob_handler_ = lob_handler;
 
   RC ret = RC::SUCCESS;
   if ((ret = buffer_pool.get_this_page(page_num, &frame_)) != RC::SUCCESS) {
@@ -158,10 +160,11 @@ RC RecordPageHandler::recover_init(DiskBufferPool &buffer_pool, PageNum page_num
   return ret;
 }
 
-RC RecordPageHandler::init_empty_page(
-    DiskBufferPool &buffer_pool, LogHandler &log_handler, PageNum page_num, int record_size, TableMeta *table_meta)
+RC RecordPageHandler::init_empty_page(DiskBufferPool &buffer_pool, LogHandler &log_handler, PageNum page_num,
+    int record_size, TableMeta *table_meta, LobFileHandler *lob_handler)
 {
-  RC rc = init(buffer_pool, log_handler, page_num, ReadWriteMode::READ_WRITE);
+  RC rc        = init(buffer_pool, log_handler, page_num, ReadWriteMode::READ_WRITE);
+  lob_handler_ = lob_handler;
   if (OB_FAIL(rc)) {
     LOG_ERROR("Failed to init empty page page_num:record_size %d:%d. rc=%s", page_num, record_size, strrc(rc));
     return rc;
@@ -191,6 +194,8 @@ RC RecordPageHandler::init_empty_page(
   bitmap_ = frame_->data() + PAGE_HEADER_SIZE;
   memset(bitmap_, 0, page_bitmap_size(page_header_->record_capacity));
   // column_index[i] store the end offset of column `i` or the start offset of column `i+1`
+
+  // 计算列偏移
   int *column_index = reinterpret_cast<int *>(frame_->data() + page_header_->col_idx_offset);
   for (int i = 0; i < column_num; ++i) {
     ASSERT(i == table_meta->field(i)->field_id(), "i should be the col_id of fields[i]");
@@ -212,13 +217,14 @@ RC RecordPageHandler::init_empty_page(
 }
 
 RC RecordPageHandler::init_empty_page(DiskBufferPool &buffer_pool, LogHandler &log_handler, PageNum page_num,
-    int record_size, int column_num, const char *col_idx_data)
+    int record_size, int column_num, const char *col_idx_data, LobFileHandler *lob_handler)
 {
   RC rc = init(buffer_pool, log_handler, page_num, ReadWriteMode::READ_WRITE);
   if (OB_FAIL(rc)) {
     LOG_ERROR("Failed to init empty page page_num:record_size %d:%d. rc=%s", page_num, record_size, strrc(rc));
     return rc;
   }
+  lob_handler_ = lob_handler;
 
   (void)log_handler_.init(log_handler, buffer_pool.id(), record_size, storage_format_);
 
@@ -282,6 +288,7 @@ RC RowRecordPageHandler::insert_record(const char *data, RID *rid)
   bitmap.set_bit(index);
   page_header_->record_num++;
 
+  // 记录日志，与数据库恢复相关
   RC rc = log_handler_.insert_record(frame_, RID(get_page_num(), index), data);
   if (OB_FAIL(rc)) {
     LOG_ERROR("Failed to insert record. page_num %d:%d. rc=%s", disk_buffer_pool_->file_desc(), frame_->page_num(), strrc(rc));
@@ -417,7 +424,17 @@ bool RecordPageHandler::is_full() const { return page_header_->record_num >= pag
 RC PaxRecordPageHandler::insert_record(const char *data, RID *rid)
 {
   // your code here
-  exit(-1);
+  // Todo:
+  // 1.参考RowRecordPageHandler::insert_record完成大体实现
+  // 2.将一行数据拆分成不同的列插入到不同偏移中
+  // 对应列的偏移可以参照RecordPageHandler::init_empty_page
+  return RC::UNIMPLEMENTED;
+}
+
+RC PaxRecordPageHandler::insert_chunk(const Chunk &chunk, int start_row, int &insert_rows)
+{
+  // your code here
+  return RC::UNIMPLEMENTED;
 }
 
 RC PaxRecordPageHandler::delete_record(const RID *rid)
@@ -447,14 +464,21 @@ RC PaxRecordPageHandler::delete_record(const RID *rid)
 RC PaxRecordPageHandler::get_record(const RID &rid, Record &record)
 {
   // your code here
-  exit(-1);
+  // Todo:
+  // 1.参考RowRecordPageHandler::get_record完成大体实现
+  // 2.通过列的偏移拼接出完整的行数据
+  // 可以参照PaxRecordPageHandler::insert_record的实现
+  return RC::UNIMPLEMENTED;
 }
 
 // TODO: specify the column_ids that chunk needed. currenly we get all columns
 RC PaxRecordPageHandler::get_chunk(Chunk &chunk)
 {
   // your code here
-  exit(-1);
+  // Todo:
+  // 参照PaxRecordPageHandler::get_record
+  // 一次性获得一个page的所有record
+  return RC::UNIMPLEMENTED;
 }
 
 char *PaxRecordPageHandler::get_field_data(SlotNum slot_num, int col_id)
@@ -481,7 +505,8 @@ int PaxRecordPageHandler::get_field_len(int col_id)
 
 RecordFileHandler::~RecordFileHandler() { this->close(); }
 
-RC RecordFileHandler::init(DiskBufferPool &buffer_pool, LogHandler &log_handler, TableMeta *table_meta)
+RC RecordFileHandler::init(
+    DiskBufferPool &buffer_pool, LogHandler &log_handler, TableMeta *table_meta, LobFileHandler *lob_handler)
 {
   if (disk_buffer_pool_ != nullptr) {
     LOG_ERROR("record file handler has been openned.");
@@ -491,6 +516,7 @@ RC RecordFileHandler::init(DiskBufferPool &buffer_pool, LogHandler &log_handler,
   disk_buffer_pool_ = &buffer_pool;
   log_handler_      = &log_handler;
   table_meta_       = table_meta;
+  lob_handler_      = lob_handler;
 
   RC rc = init_free_pages();
 
@@ -581,7 +607,7 @@ RC RecordFileHandler::insert_record(const char *data, int record_size, RID *rid)
     current_page_num = frame->page_num();
 
     ret = record_page_handler->init_empty_page(
-        *disk_buffer_pool_, *log_handler_, current_page_num, record_size, table_meta_);
+        *disk_buffer_pool_, *log_handler_, current_page_num, record_size, table_meta_, lob_handler_);
     if (OB_FAIL(ret)) {
       frame->unpin();
       LOG_ERROR("Failed to init empty page. ret:%d", ret);
@@ -603,6 +629,12 @@ RC RecordFileHandler::insert_record(const char *data, int record_size, RID *rid)
 
   // 找到空闲位置
   return record_page_handler->insert_record(data, rid);
+}
+
+RC RecordFileHandler::insert_chunk(const Chunk &chunk, int record_size)
+{
+  // your code here
+  return RC::UNIMPLEMENTED;
 }
 
 RC RecordFileHandler::recover_insert_record(const char *data, int record_size, const RID &rid)
@@ -700,157 +732,23 @@ RC RecordFileHandler::visit_record(const RID &rid, function<bool(Record &)> upda
   return rc;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-RecordFileScanner::~RecordFileScanner() { close_scan(); }
-
-RC RecordFileScanner::open_scan(Table *table, DiskBufferPool &buffer_pool, Trx *trx, LogHandler &log_handler,
-    ReadWriteMode mode, ConditionFilter *condition_filter)
+RC RecordFileHandler::update_record(const RID *rid, const char *data)
 {
-  close_scan();
+  unique_ptr<RecordPageHandler> page_handler(RecordPageHandler::create(storage_format_));
 
-  table_            = table;
-  disk_buffer_pool_ = &buffer_pool;
-  trx_              = trx;
-  log_handler_      = &log_handler;
-  rw_mode_          = mode;
-
-  RC rc = bp_iterator_.init(buffer_pool, 1);
-  if (rc != RC::SUCCESS) {
-    LOG_WARN("failed to init bp iterator. rc=%d:%s", rc, strrc(rc));
+  RC rc = page_handler->init(*disk_buffer_pool_, *log_handler_, rid->page_num, ReadWriteMode::READ_WRITE);
+  if (OB_FAIL(rc)) {
+    LOG_ERROR("Failed to init record page handler. page number=%d", rid->page_num);
     return rc;
   }
-  condition_filter_ = condition_filter;
-  if (table == nullptr || table->table_meta().storage_format() == StorageFormat::ROW_FORMAT) {
-    record_page_handler_ = new RowRecordPageHandler();
-  } else {
-    record_page_handler_ = new PaxRecordPageHandler();
+
+  rc = page_handler->update_record(*rid, data);
+  if (OB_FAIL(rc)) {
+    LOG_WARN("failed to update record. rid=%s, rc=%s", rid->to_string().c_str(), strrc(rc));
+    return rc;
   }
 
   return rc;
-}
-
-/**
- * @brief 从当前位置开始找到下一条有效的记录
- *
- * 如果当前页面还有记录没有访问，就遍历当前的页面。
- * 当前页面遍历完了，就遍历下一个页面，然后找到有效的记录
- */
-RC RecordFileScanner::fetch_next_record()
-{
-  RC rc = RC::SUCCESS;
-  if (record_page_iterator_.is_valid()) {
-    // 当前页面还是有效的，尝试看一下是否有有效记录
-    rc = fetch_next_record_in_page();
-    if (rc == RC::SUCCESS || rc != RC::RECORD_EOF) {
-      // 有有效记录：RC::SUCCESS
-      // 或者出现了错误，rc != (RC::SUCCESS or RC::RECORD_EOF)
-      // RECORD_EOF 表示当前页面已经遍历完了
-      return rc;
-    }
-  }
-
-  // 上个页面遍历完了，或者还没有开始遍历某个页面，那么就从一个新的页面开始遍历查找
-  while (bp_iterator_.has_next()) {
-    PageNum page_num = bp_iterator_.next();
-    record_page_handler_->cleanup();
-    rc = record_page_handler_->init(*disk_buffer_pool_, *log_handler_, page_num, rw_mode_);
-    if (OB_FAIL(rc)) {
-      LOG_WARN("failed to init record page handler. page_num=%d, rc=%s", page_num, strrc(rc));
-      return rc;
-    }
-
-    record_page_iterator_.init(record_page_handler_);
-    rc = fetch_next_record_in_page();
-    if (rc == RC::SUCCESS || rc != RC::RECORD_EOF) {
-      // 有有效记录：RC::SUCCESS
-      // 或者出现了错误，rc != (RC::SUCCESS or RC::RECORD_EOF)
-      // RECORD_EOF 表示当前页面已经遍历完了
-      return rc;
-    }
-  }
-
-  // 所有的页面都遍历完了，没有数据了
-  next_record_.rid().slot_num = -1;
-  record_page_handler_->cleanup();
-  return RC::RECORD_EOF;
-}
-
-/**
- * @brief 遍历当前页面，尝试找到一条有效的记录
- */
-RC RecordFileScanner::fetch_next_record_in_page()
-{
-  RC rc = RC::SUCCESS;
-  while (record_page_iterator_.has_next()) {
-    rc = record_page_iterator_.next(next_record_);
-    if (rc != RC::SUCCESS) {
-      const auto page_num = record_page_handler_->get_page_num();
-      LOG_TRACE("failed to get next record from page. page_num=%d, rc=%s", page_num, strrc(rc));
-      return rc;
-    }
-
-    // 如果有过滤条件，就用过滤条件过滤一下
-    if (condition_filter_ != nullptr && !condition_filter_->filter(next_record_)) {
-      continue;
-    }
-
-    // 如果是某个事务上遍历数据，还要看看事务访问是否有冲突
-    if (trx_ == nullptr) {
-      return rc;
-    }
-
-    // 让当前事务探测一下是否访问冲突，或者需要加锁、等锁等操作，由事务自己决定
-    // TODO 把判断事务有效性的逻辑从Scanner中移除
-    rc = trx_->visit_record(table_, next_record_, rw_mode_);
-    if (rc == RC::RECORD_INVISIBLE) {
-      // 可以参考MvccTrx，表示当前记录不可见
-      // 这种模式仅在 readonly 事务下是有效的
-      continue;
-    }
-    return rc;
-  }
-
-  next_record_.rid().slot_num = -1;
-  return RC::RECORD_EOF;
-}
-
-RC RecordFileScanner::close_scan()
-{
-  if (disk_buffer_pool_ != nullptr) {
-    disk_buffer_pool_ = nullptr;
-  }
-
-  if (condition_filter_ != nullptr) {
-    condition_filter_ = nullptr;
-  }
-  if (record_page_handler_ != nullptr) {
-    record_page_handler_->cleanup();
-    delete record_page_handler_;
-    record_page_handler_ = nullptr;
-  }
-
-  return RC::SUCCESS;
-}
-
-RC RecordFileScanner::next(Record &record)
-{
-  RC rc = fetch_next_record();
-  if (OB_FAIL(rc)) {
-    return rc;
-  }
-
-  record = next_record_;
-  return RC::SUCCESS;
-}
-
-RC RecordFileScanner::update_current(const Record &record)
-{
-  if (record.rid() != next_record_.rid()) {
-    return RC::INVALID_ARGUMENT;
-  }
-
-  return record_page_handler_->update_record(record.rid(), record.data());
 }
 
 ChunkFileScanner::~ChunkFileScanner() { close_scan(); }
@@ -901,7 +799,7 @@ RC ChunkFileScanner::next_chunk(Chunk &chunk)
   while (bp_iterator_.has_next()) {
     PageNum page_num = bp_iterator_.next();
     record_page_handler_->cleanup();
-    rc = record_page_handler_->init(*disk_buffer_pool_, *log_handler_, page_num, rw_mode_);
+    rc = record_page_handler_->init(*disk_buffer_pool_, *log_handler_, page_num, rw_mode_, table_->lob_handler());
     if (OB_FAIL(rc)) {
       LOG_WARN("failed to init record page handler. page_num=%d, rc=%s", page_num, strrc(rc));
       return rc;

@@ -54,6 +54,10 @@ RC ExpressionIterator::iterate_child_expr(Expression &expr, function<RC(unique_p
       auto &arithmetic_expr = static_cast<ArithmeticExpr &>(expr);
       rc = callback(arithmetic_expr.left());
       if (OB_SUCC(rc)) {
+        // NOTE 必须加右非空判断
+        if (arithmetic_expr.right() == nullptr) {
+          return rc;
+        }
         rc = callback(arithmetic_expr.right());
       }
     } break;
@@ -63,9 +67,30 @@ RC ExpressionIterator::iterate_child_expr(Expression &expr, function<RC(unique_p
       rc = callback(aggregate_expr.child());
     } break;
 
+    case ExprType::FUNCTION: {
+      auto &function_expr = static_cast<FunctionExpr &>(expr);
+      for (auto &arg : function_expr.args()) {
+        rc = callback(arg);
+        if (OB_FAIL(rc)) {
+          break;
+        }
+      }
+    } break;
+
+    case ExprType::UNBOUND_FUNCTION: {
+      auto &function_expr = static_cast<UnboundFunctionExpr &>(expr);
+      for (auto &arg : function_expr.args()) {
+        rc = callback(arg);
+        if (OB_FAIL(rc)) {
+          break;
+        }
+      }
+    } break;
+
     case ExprType::NONE:
     case ExprType::STAR:
     case ExprType::UNBOUND_FIELD:
+    case ExprType::UNBOUND_AGGREGATION:
     case ExprType::FIELD:
     case ExprType::VALUE: {
       // Do nothing

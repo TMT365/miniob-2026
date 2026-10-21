@@ -17,10 +17,11 @@ See the Mulan PSL v2 for more details. */
 #include <stddef.h>
 #include <vector>
 
-#include "common/rc.h"
+#include "common/sys/rc.h"
 #include "storage/field/field_meta.h"
 #include "storage/index/index_meta.h"
 #include "storage/record/record_manager.h"
+#include "storage/record/record.h"
 
 class IndexScanner;
 
@@ -40,16 +41,12 @@ public:
   Index()          = default;
   virtual ~Index() = default;
 
-  virtual RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
-  {
-    return RC::UNSUPPORTED;
-  }
-  virtual RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
-  {
-    return RC::UNSUPPORTED;
-  }
+  virtual RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const vector<FieldMeta> &field_meta)  = 0;
 
-  virtual bool is_vector_index() { return false; }
+  virtual RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const vector<FieldMeta> &field_meta)    = 0;
+
+
+  virtual bool is_vector_index() = 0;
 
   const IndexMeta &index_meta() const { return index_meta_; }
 
@@ -70,6 +67,13 @@ public:
   virtual RC delete_entry(const char *record, const RID *rid) = 0;
 
   /**
+   * @brief 检查索引字段值是否已存在（用于UNIQUE索引创建时的去重检查）
+   * @param record 记录数据
+   * @param[out] exists 如果字段值已存在则为 true
+   */
+  virtual RC check_exists(const char *record, bool &exists) = 0;
+
+  /**
    * @brief 创建一个索引数据的扫描器
    *
    * @param left_key 要扫描的左边界
@@ -88,12 +92,12 @@ public:
    */
   virtual RC sync() = 0;
 
-protected:
-  RC init(const IndexMeta &index_meta, const FieldMeta &field_meta);
 
 protected:
+  RC init(const IndexMeta &index_meta, const vector<FieldMeta> &field_metas);
+
   IndexMeta index_meta_;  ///< 索引的元数据
-  FieldMeta field_meta_;  ///< 当前实现仅考虑一个字段的索引
+  vector<FieldMeta> field_metas_;  ///< 支持复合索引时，索引字段的元数据
 };
 
 /**

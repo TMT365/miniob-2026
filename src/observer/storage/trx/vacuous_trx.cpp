@@ -13,6 +13,9 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "storage/trx/vacuous_trx.h"
+#include "storage/table/table.h"
+#include "common/log/log.h"
+#include "storage/field/field.h"
 
 RC VacuousTrxKit::init() { return RC::SUCCESS; }
 
@@ -24,8 +27,6 @@ Trx *VacuousTrxKit::create_trx(LogHandler &, int32_t /*trx_id*/) { return nullpt
 
 void VacuousTrxKit::destroy_trx(Trx *trx) { delete trx; }
 
-Trx *VacuousTrxKit::find_trx(int32_t /* trx_id */) { return nullptr; }
-
 void VacuousTrxKit::all_trxes(vector<Trx *> &trxes) { return; }
 
 LogReplayer *VacuousTrxKit::create_log_replayer(Db &, LogHandler &) { return new VacuousTrxLogReplayer; }
@@ -35,6 +36,29 @@ LogReplayer *VacuousTrxKit::create_log_replayer(Db &, LogHandler &) { return new
 RC VacuousTrx::insert_record(Table *table, Record &record) { return table->insert_record(record); }
 
 RC VacuousTrx::delete_record(Table *table, Record &record) { return table->delete_record(record); }
+
+RC VacuousTrx::update_record(Table *table, Record &old_record, Record &new_record,Field *field, const Value *value)
+{
+  // 调用 引擎的 update_record方法
+  RC rc = table->update_record(old_record, new_record, field, value);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to update record. rc=%s", strrc(rc));
+    return rc;
+  }
+
+  return RC::SUCCESS;
+}
+
+RC VacuousTrx::update_record(Table *table, Record &old_record, Record &new_record)
+{
+  // 多字段更新：new_record 已经包含所有更新的值，直接调用 update_record_with_trx
+  RC rc = table->update_record_with_trx(old_record, new_record, this);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to update record. rc=%s", strrc(rc));
+    return rc;
+  }
+  return RC::SUCCESS;
+}
 
 RC VacuousTrx::visit_record(Table *table, Record &record, ReadWriteMode) { return RC::SUCCESS; }
 
