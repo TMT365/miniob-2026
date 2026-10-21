@@ -55,6 +55,25 @@ public:
   Value &operator=(const Value &other);
   Value &operator=(Value &&other);
 
+  // 重载 ==
+  bool operator==(const Value &other) const;
+  bool operator!=(const Value &other) const
+  {
+    return !(*this == other);
+  }
+  bool operator<(const Value &other) const;
+  bool operator<=(const Value &other) const
+  {
+    return *this < other || *this == other;
+  }
+  bool operator>(const Value &other) const
+  {
+    return !(*this <  other);
+  }
+  bool operator>=(const Value &other) const
+  {
+    return *this > other || *this == other;
+  }
   void reset();
   // right += left;
   static RC add(const Value &left, const Value &right, Value &result)
@@ -151,6 +170,43 @@ public:
     is_null_   = true;
     attr_type_ = AttrType::NULL_VALS;
   }
+
+  /**
+   * @brief 把一个值按目标类型和长度序列化到索引键的片段中
+   * @details 索引键的每个片段的长度就是对应列在记录中的长度，序列化出来的字节必须与
+   *          记录里存的字节完全一致，比较才能正确。类型不一致时会先做类型转换。
+   * @param value 待序列化的值
+   * @param type 目标列的类型
+   * @param length 目标列的长度
+   * @param buf 输出缓冲区，长度至少为 length
+   * @param want_greater true 表示是下界。变长字符串的值比列长时，下界要把最后一个字节加一
+   * @param[out] adjusted true 表示值比列长，边界值被截断调整过
+   */
+  static RC serialize_to_key(const Value &value, AttrType type, int length, char *buf, bool want_greater, bool *adjusted);
+
+  /**
+   * @brief 填充某个类型在索引键中的极值
+   * @details 复合索引扫描时，没有约束的列需要用该类型的极值来填充边界键
+   * @param type 列的类型
+   * @param length 该列在索引键中的长度
+   * @param buf 输出缓冲区，长度至少为 length
+   * @param maximum true 取最大值，false 取最小值
+   */
+  static void fill_extreme(AttrType type, int length, char *buf, bool maximum);
+
+  /**
+   * @brief 把用户键片段归一化成指定长度的字节序列
+   * @details 变长字符串列的边界值可能比列本身短(需要补零)或者比列长(需要截断)。
+   *          边界值比列长时，下界要把最后一个字节加一，上界不加，并且边界要变成闭区间。
+   * @param user_key 用户键片段
+   * @param key_len 用户键片段的长度
+   * @param attr_length 列的长度
+   * @param want_greater true 表示是下界(>=)，false 表示是上界(<=)
+   * @param buf 输出缓冲区，长度至少为 attr_length
+   * @param[out] should_inclusive true 表示因为边界值过长，边界需要变成闭区间
+   */
+  static RC normalize_user_key(const char *user_key, int key_len, int attr_length, bool want_greater, char *buf,
+      bool *should_inclusive);
 
 private:
   AttrType attr_type_ = AttrType::UNDEFINED;

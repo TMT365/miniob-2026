@@ -36,12 +36,13 @@ class IndexMeta
 public:
   IndexMeta() = default;
 
-  RC init(const char *name, const FieldMeta &field, IndexType type);
+  RC init(const char *name, const vector<FieldMeta> &field, IndexType type);
 
 public:
   const char *name() const;
-  const char *field() const;
+  const vector<string> &fields() const;
   const IndexType &type() const;
+  const char *fields_str() const;
 
   void desc(ostream &os) const;
 
@@ -52,6 +53,7 @@ public:
 // 保护字段可以被子类使用
 protected:
   string name_;   // index's name
-  string field_;  // field's name
+  vector<string> fields_;  // 支持复合索引
+  string fields_str_;  // 复合索引的字段名拼接字符串，方便打印 [field1, field2, field3]
   IndexType type_;
 };

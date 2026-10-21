@@ -308,8 +308,7 @@ RC LogicalPlanGenerator::align_expression_types(unique_ptr<Expression> &left, un
     return RC::SUCCESS;
   }
   // 如果有一边类型是NULL
-  if (left_type == AttrType::NULL_VALS || right_type == AttrType::NULL_VALS)
-    return RC::SUCCESS;
+  if (left_type == AttrType::NULL_VALS || right_type == AttrType::NULL_VALS) return RC::SUCCESS;
 
   // 类型不同，选择 cast 代价小的方向
   auto left_to_right_cost = implicit_cast_cost(left_type, right_type);

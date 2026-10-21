@@ -41,9 +41,9 @@ public:
   Index()          = default;
   virtual ~Index() = default;
 
-  virtual RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)  = 0;
+  virtual RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const vector<FieldMeta> &field_meta)  = 0;
 
-  virtual RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)    = 0;
+  virtual RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const vector<FieldMeta> &field_meta)    = 0;
 
 
   virtual bool is_vector_index() = 0;
@@ -94,11 +94,10 @@ public:
 
 
 protected:
-  RC init(const IndexMeta &index_meta, const FieldMeta &field_meta);
+  RC init(const IndexMeta &index_meta, const vector<FieldMeta> &field_metas);
 
-protected:
   IndexMeta index_meta_;  ///< 索引的元数据
-  FieldMeta field_meta_;  ///< 当前实现仅考虑一个字段的索引
+  vector<FieldMeta> field_metas_;  ///< 支持复合索引时，索引字段的元数据
 };
 
 /**

@@ -49,36 +49,67 @@ enum class BplusTreeOperationType
   DELETE,
 };
 
+/// 复合索引支持的最大列数
+static constexpr int MAX_INDEX_FIELDS = 8;
+
+/// 索引文件的魔数与格式版本号。打开索引文件时校验魔数，避免把旧格式的文件当成新格式解析
+static constexpr int32_t INDEX_FILE_MAGIC   = 0x4D494E42;  // "MINB"
+static constexpr int32_t INDEX_FILE_VERSION = 1;
+
+/**
+ * @brief 索引列的描述信息
+ * @details 复合索引的每一个列都需要记录类型、长度，以及它在表记录中的偏移
+ */
+struct IndexAttrMeta
+{
+  AttrType type;    ///< 列的类型
+  int32_t  length;  ///< 列的长度，定长列即为声明的长度
+  int32_t  offset;  ///< 该列在表记录中的字节偏移
+};
+
 /**
  * @brief 属性比较(BplusTree)
  * @ingroup BPlusTree
+ * @details 按列顺序逐列比较多个索引列的字典序，第一处不相等即返回结果
  */
 class AttrComparator
 {
 public:
-  void init(AttrType type, int length)
+  void init(const vector<IndexAttrMeta> &attrs)
   {
-    attr_type_   = type;
-    attr_length_ = length;
+    attrs_ = attrs;
+    total_length_ = 0;
+    for (const IndexAttrMeta &attr : attrs_) {
+      total_length_ += attr.length;
+    }
   }
 
-  int attr_length() const { return attr_length_; }
+  /// 所有索引列的长度之和，即用户键的字节数
+  int total_length() const { return total_length_; }
 
   int operator()(const char *v1, const char *v2) const
   {
     // TODO: optimized the comparison
-    Value left;
-    left.set_type(attr_type_);
-    left.set_data(v1, attr_length_);
-    Value right;
-    right.set_type(attr_type_);
-    right.set_data(v2, attr_length_);
-    return DataType::type_instance(attr_type_)->compare(left, right);
+    int offset = 0;
+    for (const IndexAttrMeta &attr : attrs_) {
+      Value left;
+      left.set_type(attr.type);
+      left.set_data(v1 + offset, attr.length);
+      Value right;
+      right.set_type(attr.type);
+      right.set_data(v2 + offset, attr.length);
+      int result = DataType::type_instance(attr.type)->compare(left, right);
+      if (result != 0) {
+        return result;
+      }
+      offset += attr.length;
+    }
+    return 0;
   }
 
 private:
-  AttrType attr_type_;
-  int      attr_length_;
+  vector<IndexAttrMeta> attrs_;
+  int                   total_length_ = 0;
 };
 
 /**
@@ -89,7 +120,7 @@ private:
 class KeyComparator
 {
 public:
-  void init(AttrType type, int length) { attr_comparator_.init(type, length); }
+  void init(const vector<IndexAttrMeta> &attrs) { attr_comparator_.init(attrs); }
 
   const AttrComparator &attr_comparator() const { return attr_comparator_; }
 
@@ -100,8 +131,8 @@ public:
       return result;
     }
 
-    const RID *rid1 = (const RID *)(v1 + attr_comparator_.attr_length());
-    const RID *rid2 = (const RID *)(v2 + attr_comparator_.attr_length());
+    const RID *rid1 = (const RID *)(v1 + attr_comparator_.total_length());
+    const RID *rid2 = (const RID *)(v2 + attr_comparator_.total_length());
     return RID::compare(rid1, rid2);
   }
 
@@ -116,23 +147,36 @@ private:
 class AttrPrinter
 {
 public:
-  void init(AttrType type, int length)
+  void init(const vector<IndexAttrMeta> &attrs)
   {
-    attr_type_   = type;
-    attr_length_ = length;
+    attrs_ = attrs;
+    total_length_ = 0;
+    for (const IndexAttrMeta &attr : attrs_) {
+      total_length_ += attr.length;
+    }
   }
 
-  int attr_length() const { return attr_length_; }
+  /// 所有索引列的长度之和，即用户键的字节数
+  int total_length() const { return total_length_; }
 
   string operator()(const char *v) const
   {
-    Value value(attr_type_, const_cast<char *>(v), attr_length_);
-    return value.to_string();
+    stringstream ss;
+    int          offset = 0;
+    for (const IndexAttrMeta &attr : attrs_) {
+      if (offset > 0) {
+        ss << ",";
+      }
+      Value value(attr.type, const_cast<char *>(v) + offset, attr.length);
+      ss << value.to_string();
+      offset += attr.length;
+    }
+    return ss.str();
   }
 
 private:
-  AttrType attr_type_;
-  int      attr_length_;
+  vector<IndexAttrMeta> attrs_;
+  int                   total_length_ = 0;
 };
 
 /**
@@ -142,7 +186,7 @@ private:
 class KeyPrinter
 {
 public:
-  void init(AttrType type, int length) { attr_printer_.init(type, length); }
+  void init(const vector<IndexAttrMeta> &attrs) { attr_printer_.init(attrs); }
 
   const AttrPrinter &attr_printer() const { return attr_printer_; }
 
@@ -151,7 +195,7 @@ public:
     stringstream ss;
     ss << "{key:" << attr_printer_(v) << ",";
 
-    const RID *rid = (const RID *)(v + attr_printer_.attr_length());
+    const RID *rid = (const RID *)(v + attr_printer_.total_length());
     ss << "rid:{" << rid->to_string() << "}}";
     return ss.str();
   }
@@ -164,7 +208,7 @@ private:
  * @brief the meta information of bplus tree
  * @ingroup BPlusTree
  * @details this is the first page of bplus tree.
- * only one field can be supported, can you extend it to multi-fields?
+ * 支持多个索引列，单列索引就是 num_fields == 1 的特例。
  */
 struct IndexFileHeader
 {
@@ -172,21 +216,48 @@ struct IndexFileHeader
   {
     memset(this, 0, sizeof(IndexFileHeader));
     root_page = BP_INVALID_PAGE_NUM;
+    magic     = INDEX_FILE_MAGIC;
+    version   = INDEX_FILE_VERSION;
   }
-  PageNum  root_page;          ///< 根节点在磁盘中的页号
-  int32_t  internal_max_size;  ///< 内部节点最大的键值对数
-  int32_t  leaf_max_size;      ///< 叶子节点最大的键值对数
-  int32_t  attr_length;        ///< 键值的长度
-  int32_t  key_length;         ///< attr length + sizeof(RID)
-  AttrType attr_type;          ///< 键值的类型
+
+  int32_t       magic;             ///< 魔数，打开索引文件时校验，防止把旧格式的文件当成新格式解析
+  int32_t       version;           ///< 索引文件的格式版本
+  PageNum       root_page;         ///< 根节点在磁盘中的页号
+  int32_t       internal_max_size; ///< 内部节点最大的键值对数
+  int32_t       leaf_max_size;     ///< 叶子节点最大的键值对数
+  int32_t       num_fields;        ///< 索引列的个数
+  int32_t       attr_length;       ///< 所有索引列长度之和，即用户键的字节数
+  int32_t       key_length;        ///< attr_length + sizeof(RID)
+  IndexAttrMeta attrs[MAX_INDEX_FIELDS];  ///< 各索引列的描述信息
+
+  /// 取出各索引列的描述信息
+  vector<IndexAttrMeta> attrs_vector() const
+  {
+    vector<IndexAttrMeta> result;
+    result.reserve(num_fields);
+    for (int i = 0; i < num_fields && i < MAX_INDEX_FIELDS; i++) {
+      result.push_back(attrs[i]);
+    }
+    return result;
+  }
 
   const string to_string() const
   {
     stringstream ss;
 
-    ss << "attr_length:" << attr_length << ","
+    ss << "magic:" << magic << ","
+       << "version:" << version << ","
+       << "num_fields:" << num_fields << ","
+       << "attr_length:" << attr_length << ","
        << "key_length:" << key_length << ","
-       << "attr_type:" << attr_type_to_string(attr_type) << ","
+       << "attrs:[";
+    for (int i = 0; i < num_fields && i < MAX_INDEX_FIELDS; i++) {
+      if (i > 0) {
+        ss << ",";
+      }
+      ss << "(" << attr_type_to_string(attrs[i].type) << "," << attrs[i].length << "," << attrs[i].offset << ")";
+    }
+    ss << "],"
        << "root_page:" << root_page << ","
        << "internal_max_size:" << internal_max_size << ","
        << "leaf_max_size:" << leaf_max_size << ";";
@@ -454,14 +525,14 @@ public:
    * @param log_handler 记录日志
    * @param bpm 缓冲池管理器
    * @param file_name 文件名
-   * @param attr_type 属性类型
-   * @param attr_length 属性长度
+   * @param attrs 各索引列的描述信息
    * @param internal_max_size 内部节点最大大小
    * @param leaf_max_size 叶子节点最大大小
    */
-  RC create(LogHandler &log_handler, BufferPoolManager &bpm, const char *file_name, AttrType attr_type, int attr_length,
-      int internal_max_size = -1, int leaf_max_size = -1);
-  RC create(LogHandler &log_handler, DiskBufferPool &buffer_pool, AttrType attr_type, int attr_length,
+  RC create(LogHandler &log_handler, BufferPoolManager &bpm, const char *file_name,
+    const vector<IndexAttrMeta> &attrs, int internal_max_size = -1, int leaf_max_size = -1);
+
+  RC create(LogHandler &log_handler, DiskBufferPool &buffer_pool, const vector<IndexAttrMeta> &attrs,
       int internal_max_size = -1, int leaf_max_size = -1);
 
   /**

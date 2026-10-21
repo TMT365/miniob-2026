@@ -179,19 +179,18 @@ RC HeapTableEngine::get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadW
   return rc;
 }
 
-RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name,const IndexType &index_type)
+RC HeapTableEngine::create_index(Trx *trx, const vector<FieldMeta> &field_metas, const char *index_name,const IndexType &index_type)
 {
-  if (common::is_blank(index_name) || nullptr == field_meta) {
-    LOG_INFO("Invalid input arguments, table name is %s, index_name is blank or attribute_name is blank", table_meta_->name());
+  if (common::is_blank(index_name) || field_metas.empty()) {
+    LOG_INFO("Invalid input arguments, table name is %s, index_name is blank or field_metas is empty", table_meta_->name());
     return RC::INVALID_ARGUMENT;
   }
 
   IndexMeta new_index_meta;
 
-  RC rc = new_index_meta.init(index_name, *field_meta,index_type);
+  RC rc = new_index_meta.init(index_name, field_metas, index_type);
   if (rc != RC::SUCCESS) {
-    LOG_INFO("Failed to init IndexMeta in table:%s, index_name:%s, field_name:%s", 
-             table_meta_->name(), index_name, field_meta->name());
+    LOG_INFO("Failed to init IndexMeta in table:%s, index_name:%s", table_meta_->name(), index_name);
     return rc;
   }
 
@@ -199,7 +198,7 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
   BplusTreeIndex *index      = new BplusTreeIndex();
   string          index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_name);
 
-  rc = index->create(table_, index_file.c_str(), new_index_meta, *field_meta);
+  rc = index->create(table_, index_file.c_str(), new_index_meta, field_metas);
   if (rc != RC::SUCCESS) {
     delete index;
     LOG_ERROR("Failed to create bplus tree index. file name=%s, rc=%d:%s", index_file.c_str(), rc, strrc(rc));
@@ -305,7 +304,7 @@ RC HeapTableEngine::insert_entry_of_indexes(const char *record, const RID &rid)
         return rc;
       }
       if (exists) {
-        LOG_WARN("[ unique index / primary key ] conflict, index=%s, field=%s",index->index_meta().name(), index->index_meta().field());
+        LOG_WARN("[ unique index / primary key ] conflict, index=%s, field=%s",index->index_meta().name(), index->index_meta().fields_str());
         return RC::RECORD_DUPLICATE_KEY;
       }
     }
@@ -427,7 +426,15 @@ RC HeapTableEngine::find_all_index(vector<Index *> &indexes) const
 RC HeapTableEngine::find_all_index_by_field_name(const char *field_name, vector<Index *> &out, IndexType *index_type) const
 {
   for (Index *index : indexes_) {
-    if (0 == strcmp(index->index_meta().field(), field_name)) {
+    // 索引包含该字段即认为匹配。复合索引只要其中任意一列是该字段就算命中
+    bool matched = false;
+    for (const string &field : index->index_meta().fields()) {
+      if (0 == strcmp(field.c_str(), field_name)) {
+        matched = true;
+        break;
+      }
+    }
+    if (matched) {
       if (index_type == nullptr || *index_type == index->index_meta().type()) {
         out.push_back(index);
       }
@@ -467,19 +474,25 @@ RC HeapTableEngine::open()
   const int index_num = table_meta_->index_num();
   for (int i = 0; i < index_num; i++) {
     const IndexMeta *index_meta = table_meta_->index(i);
-    const FieldMeta *field_meta = table_meta_->field(index_meta->field());
-    if (field_meta == nullptr) {
-      LOG_ERROR("Found invalid index meta info which has a non-exists field. table=%s, index=%s, field=%s",
-                table_meta_->name(), index_meta->name(), index_meta->field());
-      // skip cleanup
-      //  do all cleanup action in destructive Table function
-      return RC::INTERNAL;
+
+    // 收集索引涉及的所有字段的元数据
+    vector<FieldMeta> field_metas;
+    for (const string &field_name : index_meta->fields()) {
+      const FieldMeta *field_meta = table_meta_->field(field_name.c_str());
+      if (field_meta == nullptr) {
+        LOG_ERROR("Found invalid index meta info which has a non-exists field. table=%s, index=%s, field=%s",
+                  table_meta_->name(), index_meta->name(), field_name.c_str());
+        // skip cleanup
+        //  do all cleanup action in destructive Table function
+        return RC::INTERNAL;
+      }
+      field_metas.push_back(*field_meta);
     }
 
     BplusTreeIndex *index      = new BplusTreeIndex();
     string          index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_meta->name());
 
-    rc = index->open(table_, index_file.c_str(), *index_meta, *field_meta);
+    rc = index->open(table_, index_file.c_str(), *index_meta, field_metas);
     if (rc != RC::SUCCESS) {
       delete index;
       LOG_ERROR("Failed to open index. table=%s, index=%s, file=%s, rc=%s",

@@ -29,16 +29,38 @@ using namespace common;
  */
 #define FIRST_INDEX_PAGE 1
 
-int calc_internal_page_capacity(int attr_length)
+/**
+ * @brief 计算所有索引列的长度之和，即用户键的字节数
+ */
+int calc_total_attr_length(const vector<IndexAttrMeta> &attrs)
 {
-  int item_size = attr_length + sizeof(RID) + sizeof(PageNum);
+  int total = 0;
+  for (const IndexAttrMeta &attr : attrs) {
+    total += attr.length;
+  }
+  return total;
+}
+
+/**
+ * @brief 计算内部节点一页最多能放多少个键值对
+ * @details 内部节点的 item = key + value，其中 key 是 [用户键][RID]，value 是子节点的页号。
+ * 复合索引的用户键是所有索引列字节的拼接，所以 item 的大小要用所有列的长度之和。
+ */
+int calc_internal_page_capacity(const vector<IndexAttrMeta> &attrs)
+{
+  int item_size = calc_total_attr_length(attrs) + sizeof(RID) + sizeof(PageNum);
   int capacity  = ((int)BP_PAGE_DATA_SIZE - InternalIndexNode::HEADER_SIZE) / item_size;
   return capacity;
 }
 
-int calc_leaf_page_capacity(int attr_length)
+/**
+ * @brief 计算叶子节点一页最多能放多少个键值对
+ * @details 叶子节点的 item = key + value，其中 key 是 [用户键][RID]，value 是指向堆表记录的 RID。
+ * 注意这里用的是 LeafIndexNode 的头大小和 RID 的大小。
+ */
+int calc_leaf_page_capacity(const vector<IndexAttrMeta> &attrs)
 {
-  int item_size = attr_length + sizeof(RID) + sizeof(RID);
+  int item_size = calc_total_attr_length(attrs) + sizeof(RID) + sizeof(RID);
   int capacity  = ((int)BP_PAGE_DATA_SIZE - LeafIndexNode::HEADER_SIZE) / item_size;
   return capacity;
 }
@@ -795,9 +817,8 @@ RC BplusTreeHandler::sync()
 
 RC BplusTreeHandler::create(LogHandler &log_handler,
                             BufferPoolManager &bpm,
-                            const char *file_name, 
-                            AttrType attr_type, 
-                            int attr_length, 
+                            const char *file_name,
+                            const vector<IndexAttrMeta> &attrs,
                             int internal_max_size /* = -1*/,
                             int leaf_max_size /* = -1 */)
 {
@@ -817,7 +838,7 @@ RC BplusTreeHandler::create(LogHandler &log_handler,
   }
   LOG_INFO("Successfully open index file %s.", file_name);
 
-  rc = this->create(log_handler, *bp, attr_type, attr_length, internal_max_size, leaf_max_size);
+  rc = this->create(log_handler, *bp, attrs, internal_max_size, leaf_max_size);
   if (OB_FAIL(rc)) {
     bpm.close_file(file_name);
     return rc;
@@ -829,16 +850,20 @@ RC BplusTreeHandler::create(LogHandler &log_handler,
 
 RC BplusTreeHandler::create(LogHandler &log_handler,
             DiskBufferPool &buffer_pool,
-            AttrType attr_type,
-            int attr_length,
+            const vector<IndexAttrMeta> &attrs,
             int internal_max_size /* = -1 */,
             int leaf_max_size /* = -1 */)
 {
+  if (attrs.empty() || attrs.size() > MAX_INDEX_FIELDS) {
+    LOG_WARN("invalid index attrs. size=%zu, max=%d", attrs.size(), MAX_INDEX_FIELDS);
+    return RC::INVALID_ARGUMENT;
+  }
+
   if (internal_max_size < 0) {
-    internal_max_size = calc_internal_page_capacity(attr_length);
+    internal_max_size = calc_internal_page_capacity(attrs);
   }
   if (leaf_max_size < 0) {
-    leaf_max_size = calc_leaf_page_capacity(attr_length);
+    leaf_max_size = calc_leaf_page_capacity(attrs);
   }
 
   log_handler_      = &log_handler;
@@ -864,9 +889,14 @@ RC BplusTreeHandler::create(LogHandler &log_handler,
 
   char            *pdata         = header_frame->data();
   IndexFileHeader *file_header   = (IndexFileHeader *)pdata;
-  file_header->attr_length       = attr_length;
-  file_header->key_length        = attr_length + sizeof(RID);
-  file_header->attr_type         = attr_type;
+  file_header->magic             = INDEX_FILE_MAGIC;
+  file_header->version           = INDEX_FILE_VERSION;
+  file_header->num_fields        = static_cast<int32_t>(attrs.size());
+  file_header->attr_length       = calc_total_attr_length(attrs);
+  file_header->key_length        = file_header->attr_length + sizeof(RID);
+  for (size_t i = 0; i < attrs.size(); i++) {
+    file_header->attrs[i] = attrs[i];
+  }
   file_header->internal_max_size = internal_max_size;
   file_header->leaf_max_size     = leaf_max_size;
   file_header->root_page         = BP_INVALID_PAGE_NUM;
@@ -886,8 +916,8 @@ RC BplusTreeHandler::create(LogHandler &log_handler,
     return RC::NOMEM;
   }
 
-  key_comparator_.init(file_header->attr_type, file_header->attr_length);
-  key_printer_.init(file_header->attr_type, file_header->attr_length);
+  key_comparator_.init(attrs);
+  key_printer_.init(attrs);
 
   /*
   虽然我们针对B+树记录了WAL，但是我们记录的都是逻辑日志，并没有记录某个页面如何修改的物理日志。
@@ -948,6 +978,20 @@ RC BplusTreeHandler::open(LogHandler &log_handler, DiskBufferPool &buffer_pool)
   disk_buffer_pool_ = &buffer_pool;
   log_handler_      = &log_handler;
 
+  // 校验魔数，避免把旧格式的索引文件当成新格式解析
+  if (file_header_.magic != INDEX_FILE_MAGIC) {
+    LOG_WARN("index file format mismatch. magic=0x%x, expect=0x%x. "
+             "the index file was created by an old version, please DROP INDEX and recreate it.",
+             file_header_.magic, INDEX_FILE_MAGIC);
+    buffer_pool.unpin_page(frame);
+    return RC::INVALID_ARGUMENT;
+  }
+  if (file_header_.num_fields <= 0 || file_header_.num_fields > MAX_INDEX_FIELDS) {
+    LOG_WARN("invalid num_fields in index file. num_fields=%d", file_header_.num_fields);
+    buffer_pool.unpin_page(frame);
+    return RC::INVALID_ARGUMENT;
+  }
+
   mem_pool_item_ = make_unique<common::MemPoolItem>("b+tree");
   if (mem_pool_item_->init(file_header_.key_length) < 0) {
     LOG_WARN("Failed to init memory pool for index");
@@ -958,8 +1002,8 @@ RC BplusTreeHandler::open(LogHandler &log_handler, DiskBufferPool &buffer_pool)
   // close old page_handle
   buffer_pool.unpin_page(frame);
 
-  key_comparator_.init(file_header_.attr_type, file_header_.attr_length);
-  key_printer_.init(file_header_.attr_type, file_header_.attr_length);
+  key_comparator_.init(file_header_.attrs_vector());
+  key_printer_.init(file_header_.attrs_vector());
   LOG_INFO("Successfully open index");
   return RC::SUCCESS;
 }
@@ -1437,8 +1481,8 @@ RC BplusTreeHandler::recover_init_header_page(BplusTreeMiniTransaction &mtr, Fra
   header_dirty_ = false;
   frame->mark_dirty();
 
-  key_comparator_.init(file_header_.attr_type, file_header_.attr_length);
-  key_printer_.init(file_header_.attr_type, file_header_.attr_length);
+  key_comparator_.init(file_header_.attrs_vector());
+  key_printer_.init(file_header_.attrs_vector());
 
   return RC::SUCCESS;
 }
@@ -1867,7 +1911,8 @@ RC BplusTreeScanner::open(const char *left_user_key, int left_len, bool left_inc
   } else {
 
     char *fixed_left_key = const_cast<char *>(left_user_key);
-    if (tree_handler_.file_header_.attr_type == AttrType::CHARS) {
+    // 只有单列的 CHARS 索引才需要做变长补齐。复合索引的边界键由上层构造成完整长度
+    if (tree_handler_.file_header_.num_fields == 1 && tree_handler_.file_header_.attrs[0].type == AttrType::CHARS) {
       bool should_inclusive_after_fix = false;
       rc = fix_user_key(left_user_key, left_len, true /*greater*/, &fixed_left_key, &should_inclusive_after_fix);
       if (OB_FAIL(rc)) {
@@ -1878,6 +1923,15 @@ RC BplusTreeScanner::open(const char *left_user_key, int left_len, bool left_inc
       if (should_inclusive_after_fix) {
         left_inclusive = true;
       }
+      // 补齐之后就是完整长度
+      left_len = tree_handler_.file_header_.attr_length;
+    }
+
+    // 边界键必须是完整长度的用户键，否则 make_key 会读到缓冲区之外
+    if (left_len < tree_handler_.file_header_.attr_length) {
+      LOG_WARN("left key is too short. len=%d, expect=%d",
+               left_len, tree_handler_.file_header_.attr_length);
+      return RC::INVALID_ARGUMENT;
     }
 
     MemPoolItem::item_unique_ptr left_pkey;
@@ -1934,7 +1988,8 @@ RC BplusTreeScanner::open(const char *left_user_key, int left_len, bool left_inc
 
     char *fixed_right_key          = const_cast<char *>(right_user_key);
     bool  should_include_after_fix = false;
-    if (tree_handler_.file_header_.attr_type == AttrType::CHARS) {
+    // 只有单列的 CHARS 索引才需要做变长补齐。复合索引的边界键由上层构造成完整长度
+    if (tree_handler_.file_header_.num_fields == 1 && tree_handler_.file_header_.attrs[0].type == AttrType::CHARS) {
       rc = fix_user_key(right_user_key, right_len, false /*want_greater*/, &fixed_right_key, &should_include_after_fix);
       if (OB_FAIL(rc)) {
         LOG_WARN("failed to fix right user key. rc=%s", strrc(rc));
@@ -1944,7 +1999,17 @@ RC BplusTreeScanner::open(const char *left_user_key, int left_len, bool left_inc
       if (should_include_after_fix) {
         right_inclusive = true;
       }
+      // 补齐之后就是完整长度
+      right_len = tree_handler_.file_header_.attr_length;
     }
+
+    // 边界键必须是完整长度的用户键，否则 make_key 会读到缓冲区之外
+    if (right_len < tree_handler_.file_header_.attr_length) {
+      LOG_WARN("right key is too short. len=%d, expect=%d",
+               right_len, tree_handler_.file_header_.attr_length);
+      return RC::INVALID_ARGUMENT;
+    }
+
     if (right_inclusive) {
       right_key_ = tree_handler_.make_key(fixed_right_key, *RID::max());
     } else {
@@ -2052,7 +2117,7 @@ RC BplusTreeScanner::fix_user_key(
   }
 
   // 这里很粗暴，变长字段才需要做调整，其它默认都不需要做调整
-  assert(tree_handler_.file_header_.attr_type == AttrType::CHARS);
+  assert(tree_handler_.file_header_.num_fields == 1 && tree_handler_.file_header_.attrs[0].type == AttrType::CHARS);
   assert(strlen(user_key) >= static_cast<size_t>(key_len));
 
   *should_inclusive = false;

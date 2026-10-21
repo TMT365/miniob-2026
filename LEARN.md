@@ -16,6 +16,8 @@
 10. [各结构之间的关联](#10-各结构之间的关联)
 11. [逻辑计划重写规则](#11-逻辑计划重写规则)
 12. [表达式功能扩展：聚合函数与普通函数](#12-表达式功能扩展聚合函数与普通函数)
+13. [单元测试（unittest）的使用](#13-单元测试unittest的使用)
+14. [复合索引（多列索引）](#14-复合索引多列索引)
 
 ---
 
@@ -1348,3 +1350,413 @@ No rule to make target '.../FunctionExpr.cpp'
 函数功能扩展的关键原则是：
 
 > 语法统一解析，绑定阶段分类；行式和向量化执行复用同一计算逻辑；定长和变长列使用不同的存储路径；拷贝与引用明确区分所有权。
+
+---
+
+## 13. 单元测试（unittest）的使用
+
+MiniOB 的单元测试基于 **GoogleTest**，位于 `unittest/` 目录。它和 `test/case/` 下的 SQL 用例是两套互补的验证手段：单测负责函数级的内部逻辑，SQL 用例负责语句级的语义和结果比对。
+
+### 13.1 目录结构
+
+```text
+unittest/
+├── CMakeLists.txt          # 顶层，按子目录递归
+├── common/                 # 与存储无关的通用组件测试
+├── oblsm/                  # LSM 存储引擎测试
+├── memtracer/              # 内存追踪（需 WITH_MEMTRACER=ON）
+└── observer/               # 观察者相关测试，本项目改动的主要落点
+```
+
+`unittest/observer/` 下有 24 个测试文件，整个 `unittest/` 共 47 个。
+
+### 13.2 测试是怎么被构建出来的
+
+关键在 `unittest/observer/CMakeLists.txt`：
+
+```cmake
+FILE(GLOB_RECURSE ALL_SRC *.cpp)
+FOREACH (F ${ALL_SRC})
+    get_filename_component(prjName ${F} NAME_WE)   # 用文件名作为 target 名
+    ADD_EXECUTABLE(${prjName} ${F})
+    TARGET_LINK_LIBRARIES(${prjName} observer_static GTest::gtest_main)
+    add_test(NAME ${prjName} COMMAND ${prjName})  # 同时注册给 ctest
+ENDFOREACH (F)
+```
+
+两个直接结论：
+
+1. **每个 `.cpp` 编译成一个独立的可执行文件**，target 名就是文件名（去掉后缀）。
+2. **新增测试文件不需要改 CMake**，放进目录后重新跑一次 cmake 配置即可。删文件同理——CMake 是 glob 出来的，删了不会留下悬空 target。
+
+顶层 `CMakeLists.txt` 的开关：
+
+```cmake
+OPTION(WITH_UNIT_TESTS "Compile miniob with unit tests" ON)   # 默认开启
+SET(UNITTEST_OUTPUT_PATH ${PROJECT_BINARY_DIR}/unittest)       # 产物目录
+```
+
+### 13.3 构建
+
+```bash
+# 首次：装第三方依赖（gtest 装到 deps/3rd/usr/local）
+./build.sh init
+
+# 常规构建（debug）
+./build.sh debug --make -j8
+
+# 直接用 make（build_debug 目录已经配好时）
+make -C build_debug -j8
+
+# 只构建某一个测试
+make -C build_debug bplus_tree_test -j8
+```
+
+可执行文件统一输出到 `build_debug/unittest/`。
+
+### 13.4 运行：三种方式
+
+#### 方式一：直接跑二进制（最常用）
+
+```bash
+cd build_debug/unittest
+./bplus_tree_test                    # 跑全部用例
+./bplus_tree_test --gtest_list_tests # 列出所有用例名
+```
+
+#### 方式二：gtest 的 filter（调试利器）
+
+```bash
+# 只跑某一个用例
+./bplus_tree_test --gtest_filter='test_bplus_tree.test_composite_index'
+
+# 通配符
+./bplus_tree_test --gtest_filter='*composite*'
+
+# 排除某些慢用例
+./bplus_tree_test --gtest_filter='-test_bplus_tree.test_bplus_tree_insert'
+
+# 冒号分隔表示"或"
+./bplus_tree_test --gtest_filter='test_bplus_tree.test_chars:*composite*'
+```
+
+常用参数：
+
+| 参数 | 作用 |
+|------|------|
+| `--gtest_list_tests` | 列出全部用例名，不执行 |
+| `--gtest_filter=<模式>` | 按名字筛选用例 |
+| `--gtest_repeat=N` | 重复执行 N 遍，查偶发问题 |
+| `--gtest_break_on_failure` | 失败时立刻断点 |
+| `--gtest_output=xml:out.xml` | 输出 JUnit 格式报告 |
+| `--gtest_shuffle` | 随机打乱用例顺序，查用例间的状态污染 |
+
+#### 方式三：ctest（批量执行 + 汇总报告）
+
+因为 CMake 里有 `add_test()`，ctest 能识别所有测试：
+
+```bash
+cd build_debug
+ctest -N                          # 列出全部测试（当前 47 个）
+ctest -R "bplus_tree"             # 只跑名字匹配的
+ctest -R "bplus_tree" --output-on-failure
+ctest --rerun-failed              # 只重跑上次失败的
+ctest -j8                         # 并行执行
+```
+
+ctest 会在结尾汇总失败列表：
+
+```text
+    Start 29: bplus_tree_test
+3/3 Test #29: bplus_tree_test ..................   Passed   98.14 sec
+
+67% tests passed, 1 tests failed out of 3
+
+The following tests FAILED:
+	  28 - bplus_tree_log_test (Subprocess aborted)
+```
+
+### 13.5 索引相关的测试文件
+
+| 文件 | 覆盖内容 |
+|------|----------|
+| `unittest/observer/bplus_tree_test.cpp` | 叶子/内部节点操作、CHARS 变长键、扫描器、大批量插入与分裂合并，以及复合索引 `test_composite_index` |
+| `unittest/observer/bplus_tree_log_entry_test.cpp` | WAL 日志条目的序列化与反序列化 |
+| `unittest/observer/bplus_tree_log_test.cpp` | WAL 回放（`base`）与并发场景（`concurrency`） |
+
+排查索引问题时，先跑这三个：
+
+```bash
+cd build_debug
+ctest -R "bplus_tree" --output-on-failure
+```
+
+### 13.6 写一个新测试
+
+以复合索引为例（`unittest/observer/bplus_tree_test.cpp`）：
+
+```cpp
+TEST(test_bplus_tree, test_composite_index)
+{
+  LoggerFactory::init_default("test_composite.log");
+
+  VacuousLogHandler log_handler;
+
+  filesystem::path test_directory("bplus_tree");
+  filesystem::path buffer_pool_file = test_directory / "composite.btree";
+  filesystem::remove_all(test_directory);
+  filesystem::create_directory(test_directory);
+
+  BufferPoolManager bpm;
+  ASSERT_EQ(RC::SUCCESS, bpm.init(make_unique<VacuousDoubleWriteBuffer>()));
+  ASSERT_EQ(RC::SUCCESS, bpm.create_file(buffer_pool_file.c_str()));
+
+  DiskBufferPool *buffer_pool = nullptr;
+  ASSERT_EQ(RC::SUCCESS, bpm.open_file(log_handler, buffer_pool_file.c_str(), buffer_pool));
+  ASSERT_NE(nullptr, buffer_pool);
+
+  // 复合索引的两个列都是 int
+  vector<IndexAttrMeta> attrs = {{AttrType::INTS, (int32_t)sizeof(int), 0},
+                                 {AttrType::INTS, (int32_t)sizeof(int), 0}};
+
+  BplusTreeHandler handler;
+  ASSERT_EQ(RC::SUCCESS, handler.create(log_handler, *buffer_pool, attrs, ORDER, ORDER));
+
+  // 用户键是各个索引列的字节依次拼接
+  struct Key { int first; int second; };
+  Key keys[] = {{1, 1}, {1, 2}, {1, 3}, {2, 1}, {2, 2}, {3, 1}};
+
+  RID rid;
+  RC  rc = RC::SUCCESS;
+  for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+    rid.page_num = 0;
+    rid.slot_num = i;
+    rc           = handler.insert_entry((const char *)&keys[i], &rid);
+    ASSERT_EQ(RC::SUCCESS, rc);
+    ASSERT_EQ(true, handler.validate_tree());   // 每次插入后校验树结构
+  }
+
+  // 范围扫描 [ (1,2), (2,1) ]，按字典序命中 (1,2) (1,3) (2,1)
+  Key              left  = {1, 2};
+  Key              right = {2, 1};
+  BplusTreeScanner scanner(handler);
+  ASSERT_EQ(RC::SUCCESS,
+      scanner.open((const char *)&left, sizeof(left), true, (const char *)&right, sizeof(right), true));
+  int count = 0;
+  while (RC::SUCCESS == (rc = scanner.next_entry(rid))) {
+    count++;
+  }
+  scanner.close();
+  ASSERT_EQ(3, count);
+}
+```
+
+几个要点：
+
+1. **自建缓冲池**，不依赖 observer 进程，测试可以独立运行。
+2. **`validate_tree()`** 校验 B+树的内部不变式（父子指针、键序、页容量），改动节点逻辑后一定要调用。
+3. **用 `ASSERT_EQ` 而不是 `ASSERT_TRUE`**，失败时能直接看到期望值和实际值。
+4. **范围扫描同时验证开闭区间**（`true/false` 组合），这是最容易写错的地方。
+
+### 13.7 注意事项
+
+**1. `bplus_tree_test` 很慢**
+
+`test_bplus_tree_insert` 会插入 `3 × 4⁴ = 768` 条记录，且每次插入后都调用 `validate_tree()`，整轮约 100 秒。调试时用 filter 跳过它：
+
+```bash
+./bplus_tree_test --gtest_filter='-*test_bplus_tree_insert*'
+```
+
+**2. 测试会在运行目录留下文件**
+
+`bplus_tree_test` 会在**当前工作目录**下创建 `bplus_tree/` 目录，以及 `test.log`、`test_chars.log`、`test_composite.log` 等日志文件。因此应该在 `build_debug/unittest/` 下运行，不要在仓库根目录跑，否则会污染工作区。
+
+**3. 日志级别**
+
+`main()` 里用的是 `LoggerFactory::init_default("test.log", LOG_LEVEL_TRACE)`，会刷很多屏。嫌吵可以调低级别；用例内部自己调 `init_default("xxx.log")` 的则使用默认的 INFO 级别。
+
+**4. 测试之间共享目录名**
+
+`bplus_tree_test.cpp` 里 6 个用例都用同一个 `filesystem::path test_directory("bplus_tree")`，且每个用例开头都 `remove_all` + `create_directory`——会把上一个用例的文件整个清掉。各用例的索引文件名虽然不同（`chars.btree`、`scanner.btree`、`composite.btree` 等），但 `remove_all` 作用于整个目录。gtest 默认串行执行所以没问题；若将来要并行跑，需要给每个用例换成独立目录。
+
+**5. 已知失败**
+
+`bplus_tree_log_test` 的 `concurrency` 用例会在 `LatchMemo::allocate_page` 触发 `frame->pin_count() == 1` 断言。这是**改动前就存在的失败**，判断自己是否引入回归时要先在基线上跑一遍做对照。
+
+### 13.8 与 SQL 用例的分工
+
+| | 单元测试 | SQL 用例 |
+|---|---|---|
+| 位置 | `unittest/` | `test/case/` |
+| 入口 | `ctest` 或直接跑二进制 | `python3 test/case/miniob_test.py` |
+| 粒度 | 函数 / 类级别 | 语句级别 + 结果文件比对 |
+| 启动方式 | 进程内，无 observer | 会启动 observer 进程 |
+| 优点 | 快、定位精确、可覆盖边界 | 验证完整 SQL 语义 |
+| 不足 | 不验证 SQL 语法与语义 | 慢，失败时定位困难 |
+
+典型用法：**先用单测快速定位存储层问题，改通后再用 SQL 用例确认语义没变**。
+
+```bash
+# 1. 存储层：单元测试
+make -C build_debug bplus_tree_test -j8 && ./build_debug/unittest/bplus_tree_test
+
+# 2. 语义层：SQL 用例
+python3 test/case/miniob_test.py --test-cases=basic
+```
+
+SQL 用例还可以直接比对改动前后的输出是否逐字节一致，用来确认没有引入回归：
+
+```bash
+# 改动前先存一份
+cp build_debug/result_output/basic.result.tmp /tmp/baseline.tmp
+# 改动后
+diff /tmp/baseline.tmp build_debug/result_output/basic.result.tmp
+```
+
+### 13.9 排查建议
+
+| 现象 | 排查方向 |
+|------|----------|
+| ctest 报 `Failed to find target` | 新增测试文件后没重新跑 cmake 配置 |
+| 用例在 `bplus_tree` 目录上互相干扰 | 检查是否用了相同的 `test_directory` |
+| 断言失败但看不出差异 | 把 `ASSERT_TRUE` 换成 `ASSERT_EQ`，打印实际值 |
+| 大量刷屏 | 调低 `LoggerFactory::init_default` 的日志级别 |
+| 改动后某用例突然挂了 | 先在改动前的基线上跑同一个用例，确认不是既有问题 |
+
+单元测试的核心原则是：
+
+> 测试要能独立运行、失败信息要能直接定位、断言要精确到期望值；改动存储层时，先用单元测试证明内部逻辑正确，再用 SQL 用例证明对外语义没变。
+
+---
+
+## 14. 复合索引（多列索引）
+
+复合索引指一个 B+树索引跨越多个列，例如 `CREATE INDEX i_1_12 ON t(col1, col2)`。索引键是各列字节的依次拼接，比较时按列顺序逐列比较（字典序）。
+
+### 14.1 索引键的物理格式
+
+索引文件头的 `attrs[]` 描述了每个索引列：
+
+```cpp
+struct IndexAttrMeta
+{
+  AttrType type;    ///< 列的类型
+  int32_t  length;  ///< 列的长度
+  int32_t  offset;  ///< 该列在表记录中的字节偏移
+};
+```
+
+三种长度要分清楚：
+
+| 名称 | 含义 | 复合索引下的值 |
+|------|------|----------------|
+| `offset` | 该列在**表记录**里的字节位置 | 逐列不同，由 `FieldMeta::offset()` 决定 |
+| `length` | 该列占多少字节 | 逐列不同，由 `FieldMeta::len()` 决定 |
+| `attr_length` | **所有列长度之和**，即用户键的字节数 | 索引文件头里只有一个 |
+| `key_length` | `attr_length + sizeof(RID)` | B+树里完整键的长度 |
+
+> `attr_length` 保持"用户键字节数"这个语义，是让 `make_key` / `delete_entry` / 内存池初始化这几处**一行都不用改**的关键。
+
+`offset` 存进索引文件头，是为了让"从记录切出用户键"和"比较用户键"读的是**同一份描述**（`BplusTreeIndex::build_key` 与 `AttrComparator` 都从 header 取），避免两边漂移。
+
+### 14.2 为什么单列索引看起来"没有 offset"
+
+单列索引其实也需要 offset —— `BplusTreeIndex::insert_entry` 一直是 `record + field_meta_.offset()`。只是它从内存里的 `FieldMeta` 成员直接读，**从来没进过索引文件头**。原文件头只描述 B+树内部的用户键格式（type + length），不描述"怎么从记录里取字节"。
+
+复合索引必须有一份 **N 项的映射**（索引第 i 列 → 记录里的位置），因为**索引的列顺序 ≠ 记录的物理列顺序**：
+
+```sql
+CREATE TABLE t(id int, a int, b int);
+CREATE INDEX idx ON t(b, a);   -- 索引顺序 (b, a)
+-- 记录布局 [id:0-4][a:4-8][b:8-12]，索引键 = record[8..12] + record[4..8]
+```
+
+### 14.3 最左前缀匹配
+
+复合索引只能用**最左前缀**的方式使用（`sql/optimizer/index_matcher.cpp`）：
+
+1. 索引的第 0 列必须有可用的谓词，否则这个索引用不了
+2. 前面连续的列如果是等值条件，可以继续往后匹配
+3. 遇到第一个范围条件（`> < >= <=`）就停，后面的列不再参与
+4. 遇到没有谓词的列就停
+
+例：索引 `(a, b, c)`，查询 `WHERE a = 1 AND b > 5` → 只能用到前两列，`c` 不参与。
+
+多个候选索引之间的选择优先级：**等值前缀更长 > 可用前缀更长 > 列数更少**（列数少的边界更紧）。
+
+`!=` 无法用单次范围扫描表达，出现在索引的可用列上时该索引作废，退化成全表扫描。谓词本身不会丢 —— 它们留在 `predicates_` 里，扫完后由 `IndexScanPhysicalOperator::filter` 逐行 post-filter。
+
+### 14.4 边界键的构造
+
+扫描边界是一个**完整的元组**：等值列填等值，范围列填范围值，后面无界的列填该类型的极值。
+
+| 边界 | 尾部无界列填什么 |
+|------|------------------|
+| 左边界，闭区间（`>=`） | 该类型的**最小值** |
+| 左边界，开区间（`>`） | 该类型的**最大值** |
+| 右边界，闭区间（`<=`） | 该类型的**最大值** |
+| 右边界，开区间（`<`） | 该类型的**最小值** |
+
+为什么开区间的尾部要反过来？因为 B+树键的末尾还有一个 RID 作为 tie-break，扫描的起点/终点由 `make_key(user_key, RID::min()/max())` 决定：
+
+- 左边界开区间时，要排除"恰好等于下界"的记录，就得让边界键大于所有下界记录 → 尾部填最大值
+- 右边界开区间时同理 → 尾部填最小值
+
+各类型的极值（`Value::fill_extreme`）：
+
+| 类型 | 最小值 | 最大值 |
+|------|--------|--------|
+| INT | `INT32_MIN` | `INT32_MAX` |
+| FLOAT | `-FLT_MAX` | `FLT_MAX` |
+| DATE | 年月日取 `INT16_MIN` | 年月日取 `INT16_MAX` |
+| CHAR(n) | n 个 `0x00` | n 个 `0xFF` |
+
+### 14.5 边界键为什么用原始字节而不是 Value
+
+`Value` 的 CHARS 类型内部用 `strnlen` 截断（`common/value.cpp` 的 `set_string`），**存不下带零填充的字节**。而索引键里每个 CHARS 列的片段是"字符串 + `\0` + 补零"，正好会被截掉。
+
+所以边界键改成原始字节：
+
+```cpp
+IndexScanPhysicalOperator(Table *table, Index *index, ReadWriteMode mode,
+    vector<char> left_key, bool left_inclusive, vector<char> right_key, bool right_inclusive);
+```
+
+算子只把字节和长度透传给 `Index::create_scanner`，不做任何解释。字节的构造由 `Value::serialize_to_key` 负责（会先做类型转换，保证写进键的字节和记录里存的完全一致）。
+
+### 14.6 各层的分工
+
+| 层 | 文件 | 职责 |
+|----|------|------|
+| 解析 | `sql/parser/yacc_sql.y` | `CREATE INDEX` 的列名列表，复用 `attr_list`（`PRIMARY KEY (a,b)` 用的那个） |
+| 语义分析 | `sql/stmt/create_index_stmt.cpp` | 解析每一列、检查字段是否存在、检查索引名/类型冲突 |
+| 索引选择 | `sql/optimizer/index_matcher.cpp` | 最左前缀匹配、选出索引、构造左右边界键 |
+| 算子 | `sql/operator/index_scan_physical_operator.cpp` | 透传边界字节给扫描器 |
+| 存储 | `storage/index/bplus_tree*.cpp` | 多列键的拼接、逐列比较、扫描 |
+
+### 14.7 索引维护
+
+`HeapTableEngine` 在插入/更新/删除时对**每一个**索引都做维护：
+
+- INSERT：先写堆记录，再写各索引的条目；索引写失败会回滚堆记录
+- UPDATE：删旧索引条目 → 原地更新记录（RID 不变）→ 写新索引条目；失败会恢复
+- DELETE：先删各索引条目，再删堆记录
+
+复合索引的键由 `BplusTreeIndex::build_key` 按 `attrs[]` 的顺序从记录里切出来，和比较器看到的布局天然一致。
+
+### 14.8 验证清单
+
+```text
+1. 语法：CREATE INDEX i ON t(c1, c2) 能解析
+2. 建索引：空表和非空表都能建，非空表要回填已有数据
+3. 列不存在：要报错而不是建出坏索引
+4. 最左前缀：只给第 0 列的谓词能用；只给第 1 列的不能用
+5. 等值前缀：a=1 AND b=2 能用满两列
+6. 范围：a=1 AND b>2 的边界是完整的元组
+7. 开闭区间：> 和 >= 的结果行数要差一个边界值
+8. 维护：INSERT/UPDATE/DELETE 之后索引结果仍然正确
+9. 对比：同样的查询，有索引的表和无索引的表结果集合必须一致
+```
+
+第 9 条最有用 —— 建两张结构相同的表，一张建索引一张不建，跑同一批查询对比结果（注意没有 `ORDER BY` 时行序不保证一致，要排序后比较）。

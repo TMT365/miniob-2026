@@ -330,7 +330,10 @@ TEST(test_bplus_tree, test_leaf_index_node_handle)
   index_file_header.leaf_max_size     = 5;
   index_file_header.attr_length       = 4;
   index_file_header.key_length        = 4 + sizeof(RID);
-  index_file_header.attr_type         = AttrType::INTS;
+  index_file_header.num_fields        = 1;
+  index_file_header.attrs[0].type     = AttrType::INTS;
+  index_file_header.attrs[0].length   = 4;
+  index_file_header.attrs[0].offset   = 0;
 
   VacuousLogHandler log_handler;
   BufferPoolManager bpm;
@@ -344,8 +347,7 @@ TEST(test_bplus_tree, test_leaf_index_node_handle)
   ASSERT_EQ(RC::SUCCESS,
       tree_handler.create(log_handler,
           *buffer_pool,
-          index_file_header.attr_type,
-          index_file_header.attr_length,
+          index_file_header.attrs_vector(),
           index_file_header.internal_max_size,
           index_file_header.leaf_max_size));
   BplusTreeMiniTransaction mtr(tree_handler);
@@ -353,7 +355,7 @@ TEST(test_bplus_tree, test_leaf_index_node_handle)
   Frame frame;
 
   KeyComparator key_comparator;
-  key_comparator.init(AttrType::INTS, 4);
+  key_comparator.init(index_file_header.attrs_vector());
 
   LeafIndexNodeHandler leaf_node(mtr, index_file_header, &frame);
   leaf_node.init_empty();
@@ -411,7 +413,10 @@ TEST(test_bplus_tree, test_internal_index_node_handle)
   index_file_header.leaf_max_size     = 5;
   index_file_header.attr_length       = 4;
   index_file_header.key_length        = 4 + sizeof(RID);
-  index_file_header.attr_type         = AttrType::INTS;
+  index_file_header.num_fields        = 1;
+  index_file_header.attrs[0].type     = AttrType::INTS;
+  index_file_header.attrs[0].length   = 4;
+  index_file_header.attrs[0].offset   = 0;
 
   VacuousLogHandler log_handler;
   BufferPoolManager bpm;
@@ -426,8 +431,7 @@ TEST(test_bplus_tree, test_internal_index_node_handle)
   ASSERT_EQ(RC::SUCCESS,
       tree_handler.create(log_handler,
           *buffer_pool,
-          index_file_header.attr_type,
-          index_file_header.attr_length,
+          index_file_header.attrs_vector(),
           index_file_header.internal_max_size,
           index_file_header.leaf_max_size));
   BplusTreeMiniTransaction mtr(tree_handler);
@@ -435,7 +439,7 @@ TEST(test_bplus_tree, test_internal_index_node_handle)
   Frame frame;
 
   KeyComparator key_comparator;
-  key_comparator.init(AttrType::INTS, 4);
+  key_comparator.init(index_file_header.attrs_vector());
 
   InternalIndexNodeHandler internal_node(mtr, index_file_header, &frame);
   internal_node.init_empty();
@@ -538,7 +542,7 @@ TEST(test_bplus_tree, test_chars)
   ASSERT_NE(nullptr, buffer_pool);
 
   BplusTreeHandler handler;
-  ASSERT_EQ(RC::SUCCESS, handler.create(log_handler, *buffer_pool, AttrType::CHARS, 8, ORDER, ORDER));
+  ASSERT_EQ(RC::SUCCESS, handler.create(log_handler, *buffer_pool, {{AttrType::CHARS, 8, 0}}, ORDER, ORDER));
 
   char keys[][9] = {"abcdefg", "12345678", "12345678", "abcdefg", "abcdefga"};
 
@@ -588,7 +592,7 @@ TEST(test_bplus_tree, test_scanner)
   ASSERT_NE(nullptr, buffer_pool);
 
   BplusTreeHandler handler;
-  ASSERT_EQ(RC::SUCCESS, handler.create(log_handler, *buffer_pool, AttrType::INTS, sizeof(int), ORDER, ORDER));
+  ASSERT_EQ(RC::SUCCESS, handler.create(log_handler, *buffer_pool, {{AttrType::INTS, (int32_t)sizeof(int), 0}}, ORDER, ORDER));
 
   int count = 0;
   RC  rc    = RC::SUCCESS;
@@ -813,7 +817,7 @@ TEST(test_bplus_tree, test_bplus_tree_insert)
   ASSERT_NE(nullptr, buffer_pool);
 
   BplusTreeHandler *handler = new BplusTreeHandler();
-  ASSERT_EQ(RC::SUCCESS, handler->create(log_handler, *buffer_pool, AttrType::INTS, sizeof(int), ORDER, ORDER));
+  ASSERT_EQ(RC::SUCCESS, handler->create(log_handler, *buffer_pool, {{AttrType::INTS, (int32_t)sizeof(int), 0}}, ORDER, ORDER));
 
   test_insert(handler);
 
@@ -824,6 +828,133 @@ TEST(test_bplus_tree, test_bplus_tree_insert)
   handler->close();
   delete handler;
   handler = nullptr;
+}
+
+/**
+ * @brief 复合索引（多列索引）的测试
+ * @details 验证多列的用户键拼接、字典序比较、范围扫描与删除
+ */
+TEST(test_bplus_tree, test_composite_index)
+{
+  LoggerFactory::init_default("test_composite.log");
+
+  VacuousLogHandler log_handler;
+
+  filesystem::path test_directory("bplus_tree");
+  filesystem::path buffer_pool_file = test_directory / "composite.btree";
+  filesystem::remove_all(test_directory);
+  filesystem::create_directory(test_directory);
+
+  BufferPoolManager bpm;
+  ASSERT_EQ(RC::SUCCESS, bpm.init(make_unique<VacuousDoubleWriteBuffer>()));
+  ASSERT_EQ(RC::SUCCESS, bpm.create_file(buffer_pool_file.c_str()));
+
+  DiskBufferPool *buffer_pool = nullptr;
+  ASSERT_EQ(RC::SUCCESS, bpm.open_file(log_handler, buffer_pool_file.c_str(), buffer_pool));
+  ASSERT_NE(nullptr, buffer_pool);
+
+  // 复合索引的两个列都是 int
+  vector<IndexAttrMeta> attrs = {{AttrType::INTS, (int32_t)sizeof(int), 0}, {AttrType::INTS, (int32_t)sizeof(int), 0}};
+
+  BplusTreeHandler handler;
+  ASSERT_EQ(RC::SUCCESS, handler.create(log_handler, *buffer_pool, attrs, ORDER, ORDER));
+
+  // 用户键是各个索引列的字节依次拼接
+  struct Key
+  {
+    int first;
+    int second;
+  };
+  Key keys[] = {{1, 1}, {1, 2}, {1, 3}, {2, 1}, {2, 2}, {3, 1}};
+
+  RID rid;
+  RC  rc = RC::SUCCESS;
+  for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+    rid.page_num = 0;
+    rid.slot_num = i;
+    rc           = handler.insert_entry((const char *)&keys[i], &rid);
+    ASSERT_EQ(RC::SUCCESS, rc);
+    ASSERT_EQ(true, handler.validate_tree());
+  }
+
+  // 精确查找 (1, 2)
+  {
+    Key              target = {1, 2};
+    BplusTreeScanner scanner(handler);
+    ASSERT_EQ(RC::SUCCESS,
+        scanner.open((const char *)&target, sizeof(target), true, (const char *)&target, sizeof(target), true));
+    int count = 0;
+    while (RC::SUCCESS == (rc = scanner.next_entry(rid))) {
+      count++;
+    }
+    scanner.close();
+    ASSERT_EQ(1, count);
+  }
+
+  // 范围扫描 [ (1,2), (2,1) ]，按字典序命中 (1,2) (1,3) (2,1)
+  {
+    Key              left  = {1, 2};
+    Key              right = {2, 1};
+    BplusTreeScanner scanner(handler);
+    ASSERT_EQ(RC::SUCCESS,
+        scanner.open((const char *)&left, sizeof(left), true, (const char *)&right, sizeof(right), true));
+    int count = 0;
+    while (RC::SUCCESS == (rc = scanner.next_entry(rid))) {
+      count++;
+    }
+    scanner.close();
+    ASSERT_EQ(3, count);
+  }
+
+  // 左闭右开 [ (1,2), (2,1) )，命中 (1,2) (1,3)
+  {
+    Key              left  = {1, 2};
+    Key              right = {2, 1};
+    BplusTreeScanner scanner(handler);
+    ASSERT_EQ(RC::SUCCESS,
+        scanner.open((const char *)&left, sizeof(left), true, (const char *)&right, sizeof(right), false));
+    int count = 0;
+    while (RC::SUCCESS == (rc = scanner.next_entry(rid))) {
+      count++;
+    }
+    scanner.close();
+    ASSERT_EQ(2, count);
+  }
+
+  // 只按第一列的范围扫描 [(1,1), (1,3)]，命中三行
+  {
+    Key              left  = {1, 1};
+    Key              right = {1, 3};
+    BplusTreeScanner scanner(handler);
+    ASSERT_EQ(RC::SUCCESS,
+        scanner.open((const char *)&left, sizeof(left), true, (const char *)&right, sizeof(right), true));
+    int count = 0;
+    while (RC::SUCCESS == (rc = scanner.next_entry(rid))) {
+      count++;
+    }
+    scanner.close();
+    ASSERT_EQ(3, count);
+  }
+
+  // 删除 (1, 2) 之后，精确查找就查不到了
+  {
+    Key target = {1, 2};
+    rid.page_num = 0;
+    rid.slot_num = 1;
+    rc           = handler.delete_entry((const char *)&target, &rid);
+    ASSERT_EQ(RC::SUCCESS, rc);
+    ASSERT_EQ(true, handler.validate_tree());
+
+    BplusTreeScanner scanner(handler);
+    ASSERT_EQ(RC::SUCCESS,
+        scanner.open((const char *)&target, sizeof(target), true, (const char *)&target, sizeof(target), true));
+    int count = 0;
+    while (RC::SUCCESS == (rc = scanner.next_entry(rid))) {
+      count++;
+    }
+    scanner.close();
+    ASSERT_EQ(0, count);
+  }
 }
 
 int main(int argc, char **argv)

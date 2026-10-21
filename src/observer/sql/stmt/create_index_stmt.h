@@ -28,25 +28,25 @@ class FieldMeta;
 class CreateIndexStmt : public Stmt
 {
 public:
-  CreateIndexStmt(Table *table, const FieldMeta *field_meta, const string &index_name, const IndexType &type)
-      : table_(table), field_meta_(field_meta), index_name_(index_name), index_type_(type)
+  CreateIndexStmt(Table *table, const vector<FieldMeta> &field_metas, const string &index_name, const IndexType &type)
+      : table_(table), field_metas_(field_metas), index_name_(index_name), index_type_(type)
   {}
 
   virtual ~CreateIndexStmt() = default;
 
   StmtType type() const override { return StmtType::CREATE_INDEX; }
 
-  Table           *table() const { return table_; }
-  const FieldMeta *field_meta() const { return field_meta_; }
-  const string    &index_name() const { return index_name_; }
-  const IndexType  &index_type() const { return index_type_; }
+  Table                *table() const { return table_; }
+  const vector<FieldMeta> &field_metas() const { return field_metas_; }
+  const string         &index_name() const { return index_name_; }
+  const IndexType      &index_type() const { return index_type_; }
 
 public:
   static RC create(Db *db, const CreateIndexSqlNode &create_index, Stmt *&stmt);
 
 private:
-  Table           *table_      = nullptr;  ///< 表示索引是为那张表的
-  const FieldMeta *field_meta_ = nullptr;  ///< 表示给那个字段创建索引
-  string           index_name_;            ///< 索引的名字
-  IndexType        index_type_;
+  Table                *table_      = nullptr;  ///< 表示索引是为那张表的
+  vector<FieldMeta>     field_metas_;           ///< 索引涉及的字段，单列索引只有一个
+  string                index_name_;            ///< 索引的名字
+  IndexType             index_type_;
 };

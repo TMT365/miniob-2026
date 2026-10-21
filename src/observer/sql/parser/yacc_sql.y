@@ -340,33 +340,35 @@ desc_table_stmt:
     ;
 
 create_index_stmt:    /*create index 语句的语法解析树*/
-    CREATE INDEX ID ON ID LBRACE ID RBRACE  /* 普通索引 */
+    CREATE INDEX ID ON ID LBRACE attr_list RBRACE  /* 普通索引 */
     {
       $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
       CreateIndexSqlNode &create_index = $$->create_index;
       create_index.index_type = IndexType::COMMON_INDEX;
       create_index.index_name = $3;
       create_index.relation_name = $5;
-      create_index.attribute_name = $7;
-
+      create_index.attribute_names = *$7;
+      delete $7;
     }
-    | CREATE UNIQUE INDEX ID ON ID LBRACE ID RBRACE  /* 索引 */
+    | CREATE UNIQUE INDEX ID ON ID LBRACE attr_list RBRACE  /* 索引 */
     {
       $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
       CreateIndexSqlNode &create_index = $$->create_index;
       create_index.index_type = IndexType::UNIQUE_INDEX;
       create_index.index_name = $4;
       create_index.relation_name = $6;
-      create_index.attribute_name = $8;
+      create_index.attribute_names = *$8;
+      delete $8;
     }
-    | CREATE PRIMARY KEY ID ON ID LBRACE ID RBRACE  /* 创建主键暂时页算在这里面 */
+    | CREATE PRIMARY KEY ID ON ID LBRACE attr_list RBRACE  /* 创建主键暂时页算在这里面 */
     {
       $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
       CreateIndexSqlNode &create_index = $$->create_index;
       create_index.index_type = IndexType::PRIMARY_KEY;
       create_index.index_name = $4;
       create_index.relation_name = $6;
-      create_index.attribute_name = $8;
+      create_index.attribute_names = *$8;
+      delete $8;
     }
     ;
 

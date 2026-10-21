@@ -14,6 +14,9 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/value.h"
 
+#include <cfloat>
+#include <cstdint>
+
 #include "common/lang/comparator.h"
 #include "common/lang/exception.h"
 #include "common/lang/sstream.h"
@@ -96,6 +99,78 @@ Value &Value::operator=(Value &&other)
   other.own_data_  = false;  // 这是因为临时对象是没有内存的
   other.length_    = 0;
   return *this;
+}
+
+bool Value::operator==(const Value &other) const
+{
+  // 删掉 if(*this == other) 这一行！！！
+  if (attr_type_ != other.attr_type_) {
+    return false;
+  }
+  if (is_null_ != other.is_null_) {
+    return false;
+  }
+  if (length_ != other.length_) {
+    return false;
+  }
+
+  switch (attr_type_) {
+    case AttrType::CHARS: {
+      if (is_null_) {
+        return true; // 两个都是null字符串，相等
+      }
+      // 防止空指针传入strcmp
+      return strcmp(value_.pointer_value_, other.value_.pointer_value_) == 0;
+    }
+    case AttrType::INTS:
+      return value_.int_value_ == other.value_.int_value_;
+    case AttrType::FLOATS:
+      return value_.float_value_ == other.value_.float_value_;
+    case AttrType::DATES:
+      return value_.date_value_.year_ == other.value_.date_value_.year_
+          && value_.date_value_.month_ == other.value_.date_value_.month_
+          && value_.date_value_.day_ == other.value_.date_value_.day_;
+    case AttrType::BOOLEANS:
+      return value_.bool_value_ == other.value_.bool_value_;
+    default:
+      return false;
+  }
+}
+
+bool Value::operator<(const Value &other) const
+{
+  // 同类型才可比较
+  if (attr_type_ != other.attr_type_) {
+    return false;
+  }
+  if (is_null_ && !other.is_null_) {
+    return true; // null < 非null
+  }
+  switch (attr_type_) {
+    case AttrType::CHARS: {
+      if (is_null_ && other.is_null_) {
+        return false; // null == null
+      }
+      return strcmp(value_.pointer_value_, other.value_.pointer_value_) < 0;
+    }
+    case AttrType::INTS:
+      return value_.int_value_ < other.value_.int_value_;
+    case AttrType::FLOATS:
+      return value_.float_value_ < other.value_.float_value_;
+    case AttrType::DATES:
+      if (value_.date_value_.year_ != other.value_.date_value_.year_) {
+        return value_.date_value_.year_ < other.value_.date_value_.year_;
+      }
+      if (value_.date_value_.month_ != other.value_.date_value_.month_) {
+        return value_.date_value_.month_ < other.value_.date_value_.month_;
+      }
+      return value_.date_value_.day_ < other.value_.date_value_.day_;
+    case AttrType::BOOLEANS:
+      return value_.bool_value_ < other.value_.bool_value_;
+    default:
+      return false;
+  }
+
 }
 
 void Value::reset()
@@ -527,4 +602,175 @@ string Value::Val::DateValue::get_two_day() const
     return "0" + std::to_string(day_);
   }
   return std::to_string(day_);
+}
+RC Value::serialize_to_key(const Value &value, AttrType type, int length, char *buf, bool want_greater, bool *adjusted)
+{
+  if (length <= 0) {
+    return RC::INVALID_ARGUMENT;
+  }
+  if (nullptr != adjusted) {
+    *adjusted = false;
+  }
+
+  if (value.is_null()) {
+    memset(buf, 0, length);
+    return RC::SUCCESS;
+  }
+
+  // 类型不一致时先转换，保证写进索引键的字节和记录里存的一致
+  Value       converted;
+  const Value *source = &value;
+  if (value.attr_type() != type) {
+    RC rc = cast_to(value, type, converted);
+    if (OB_FAIL(rc)) {
+      LOG_WARN("failed to cast value for index key. type=%s, value=%s", attr_type_to_string(type),
+               value.to_string().c_str());
+      return rc;
+    }
+    source = &converted;
+  }
+
+  switch (type) {
+    case AttrType::INTS: {
+      int32_t int_value = source->get_int();
+      memcpy(buf, &int_value, sizeof(int32_t));
+      memset(buf + sizeof(int32_t), 0, length - sizeof(int32_t));
+    } break;
+    case AttrType::FLOATS: {
+      float float_value = source->get_float();
+      memcpy(buf, &float_value, sizeof(float));
+      memset(buf + sizeof(float), 0, length - sizeof(float));
+    } break;
+    case AttrType::DATES: {
+      const Value::Val::DateValue *date_value = source->get_date();
+      if (nullptr == date_value) {
+        memset(buf, 0, length);
+        break;
+      }
+      // 日期在记录里占 sizeof(DateValue) 字节
+      memcpy(buf, date_value, sizeof(Value::Val::DateValue));
+      memset(buf + sizeof(Value::Val::DateValue), 0, length - sizeof(Value::Val::DateValue));
+    } break;
+    case AttrType::CHARS: {
+      const char *str        = source->data();
+      int         str_length = source->length();
+      if (str == nullptr) {
+        str_length = 0;
+      }
+      if (str_length > length) {
+        // 边界值比列还长。列里存不下这个值，只能截断；下界要把最后一个字节加一，
+        // 这样截断后的边界仍然能表达原来的比较语义
+        bool should_inclusive = false;
+        RC   rc              = normalize_user_key(str, str_length, length, want_greater, buf, &should_inclusive);
+        if (OB_FAIL(rc)) {
+          return rc;
+        }
+        if (nullptr != adjusted) {
+          *adjusted = should_inclusive;
+        }
+        break;
+      }
+      // 记录里存的是 字符串 + '\0' + 补零，这里保持一致
+      int copy_length = str_length;
+      if (copy_length > 0) {
+        memcpy(buf, str, copy_length);
+      }
+      memset(buf + copy_length, 0, length - copy_length);
+    } break;
+    case AttrType::BOOLEANS: {
+      int32_t bool_value = source->get_boolean() ? 1 : 0;
+      memcpy(buf, &bool_value, sizeof(int32_t));
+      memset(buf + sizeof(int32_t), 0, length - sizeof(int32_t));
+    } break;
+    default: {
+      LOG_WARN("unsupported type for index key. type=%s", attr_type_to_string(type));
+      return RC::UNIMPLEMENTED;
+    }
+  }
+
+  return RC::SUCCESS;
+}
+
+void Value::fill_extreme(AttrType type, int length, char *buf, bool maximum)
+{
+  if (length <= 0) {
+    return;
+  }
+
+  switch (type) {
+    case AttrType::INTS: {
+      int32_t value = maximum ? INT32_MAX : INT32_MIN;
+      memcpy(buf, &value, sizeof(int32_t));
+      memset(buf + sizeof(int32_t), 0, length - sizeof(int32_t));
+    } break;
+    case AttrType::FLOATS: {
+      float value = maximum ? FLT_MAX : -FLT_MAX;
+      memcpy(buf, &value, sizeof(float));
+      memset(buf + sizeof(float), 0, length - sizeof(float));
+    } break;
+    case AttrType::DATES: {
+      // 日期按 (年, 月, 日) 比较，用 int16 的上下限保证大于/小于所有合法日期
+      Value::Val::DateValue date_value;
+      date_value.year_    = maximum ? INT16_MAX : INT16_MIN;
+      date_value.month_   = maximum ? INT16_MAX : INT16_MIN;
+      date_value.day_     = maximum ? INT16_MAX : INT16_MIN;
+      date_value.padding_ = 0;
+      memcpy(buf, &date_value, sizeof(Value::Val::DateValue));
+      memset(buf + sizeof(Value::Val::DateValue), 0, length - sizeof(Value::Val::DateValue));
+    } break;
+    case AttrType::CHARS: {
+      // 变长字符串的最小值是全 0，最大值是全 0xFF
+      memset(buf, maximum ? 0xFF : 0x00, length);
+    } break;
+    case AttrType::BOOLEANS: {
+      int32_t value = maximum ? 1 : 0;
+      memcpy(buf, &value, sizeof(int32_t));
+      memset(buf + sizeof(int32_t), 0, length - sizeof(int32_t));
+    } break;
+    default: {
+      memset(buf, maximum ? 0xFF : 0x00, length);
+    } break;
+  }
+}
+
+RC Value::normalize_user_key(
+    const char *user_key, int key_len, int attr_length, bool want_greater, char *buf, bool *should_inclusive)
+{
+  if (nullptr == buf || nullptr == should_inclusive) {
+    return RC::INVALID_ARGUMENT;
+  }
+  if (attr_length <= 0) {
+    return RC::INVALID_ARGUMENT;
+  }
+
+  *should_inclusive = false;
+
+  if (key_len <= attr_length) {
+    // 比列短，补零即可
+    if (key_len > 0 && nullptr != user_key) {
+      memcpy(buf, user_key, key_len);
+    }
+    memset(buf + (key_len > 0 ? key_len : 0), 0, attr_length - (key_len > 0 ? key_len : 0));
+    return RC::SUCCESS;
+  }
+
+  // 比列长，截断到列的长度
+  if (nullptr != user_key) {
+    memcpy(buf, user_key, attr_length);
+  } else {
+    memset(buf, 0, attr_length);
+  }
+
+  if (nullptr == user_key || user_key[attr_length] == 0) {
+    // 字符串刚好在列的长度处结束，不需要调整
+    return RC::SUCCESS;
+  }
+
+  // 边界值比列长，下界要把最后一个字节加一，上界不加，并且边界要变成闭区间
+  *should_inclusive = true;
+  if (want_greater) {
+    buf[attr_length - 1]++;
+  }
+
+  return RC::SUCCESS;
 }

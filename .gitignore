@@ -36,3 +36,4 @@ build_debug/
 data/
 logs/
 .miniob.history*
+.obclient.history

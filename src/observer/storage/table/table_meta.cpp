@@ -165,7 +165,9 @@ const IndexMeta *TableMeta::index(const char *name) const
 const IndexMeta *TableMeta::find_index_by_field(const char *field) const
 {
   for (const IndexMeta &index : indexes_) {
-    if (0 == strcmp(index.field(), field)) {
+    // 目前只返回单列索引。复合索引要利用左前缀做范围扫描，需要优化器能构造出
+    // 完整长度的边界键之后再启用，否则扫描的区间是不对的。
+    if (index.fields().size() == 1 && 0 == strcmp(index.fields()[0].c_str(), field)) {
       return &index;
     }
   }

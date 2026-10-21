@@ -4,7 +4,7 @@
 #include "common/lang/string.h"
 #include "./index_type.h"
 
-const char* INDEX_TYPE_NAME[] = {"undefined", "common_index", "unique_index", "primary_index", "maxtype"};
+const char* INDEX_TYPE_NAME[] = {"undefined", "common_index", "unique_index", "primary_index", "multi_index", "maxtype"};
 const char* index_type_to_string(IndexType type)
 {
   if (type >= IndexType::UNDEFINED && type < IndexType::MAXTYPE) {

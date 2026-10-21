@@ -14,6 +14,7 @@ enum class IndexType
   COMMON_INDEX,
   UNIQUE_INDEX,
   PRIMARY_KEY,
+  MULTI_INDEX, ///< 复合索引
   MAXTYPE,   ///< 请在 UNDEFINED 与 MAXTYPE 之间增加新类型
 };
 
